@@ -4,46 +4,79 @@ export function calculateBestMove(state, depth, player, algorithm = 'minimax') {
         return getBestMoveMCTS(state, player, 2000); 
     }
 
-    // --- STANDARD MINIMAX ---
-    let maxEval = -Infinity;
-    
+    // --- STANDARD MINIMAX WITH ITERATIVE DEEPENING & TRANSPOSITION TABLE ---
     let possibleMoves = state.getPossibleMoves(player);
     if (possibleMoves.length === 0) return -1;
     
-    // Dynamic Depth: Increase depth in endgame when total stones are low
     let totalStones = 0;
     for (let i = 0; i < 18; i++) totalStones += state.board[i];
+    
+    // 1. OPENING BOOK: If it's the very first move of the game, play standard theoretical openings
+    if (totalStones === 162 && state.currentPlayer === 0) {
+        const standardOpenings = [6, 8]; // Pit 7 or Pit 9 (0-indexed) are best first moves in theory
+        return standardOpenings[Math.floor(Math.random() * standardOpenings.length)];
+    }
+    
+    // 2. ITERATIVE DEEPENING TIME CONTROL (IDTC)
+    const startTime = Date.now();
+    const timeLimitMs = 1500; // 1.5 seconds max limit to avoid freezing the React UI
     
     let activeDepth = parseInt(depth);
     if (activeDepth >= 4) {
         if (totalStones < 50) activeDepth += 1;
         if (totalStones < 30) activeDepth += 2;
-        if (totalStones < 15) activeDepth += 3;
+        if (totalStones < 15) activeDepth += 5; // Search extremely deep in endgame
     }
     
+    const tt = new Map(); // Transposition Table for caching evaluated positions
+    let bestMovesArr = possibleMoves; // Default safety fallback
+    let absoluteBestEval = -Infinity;
+    
+    let currentDepth = 1;
+
     // Move Ordering: Evaluate pockets with the most stones first to maximize alpha-beta pruning
     possibleMoves.sort((a, b) => state.board[b] - state.board[a]);
     
-    const bestMovesArr = [];
-
-    for (let move of possibleMoves) {
-        const newState = state.clone();
-        newState.makeMove(move);
+    while (currentDepth <= activeDepth) {
+        let maxEval = -Infinity;
+        let currentDepthBestMoves = [];
         
-        const isNextMaximizing = newState.currentPlayer === player;
-        
-        const evalScore = minimax(newState, activeDepth - 1, -Infinity, Infinity, isNextMaximizing, player);
-        
-        if (evalScore > maxEval) {
-            maxEval = evalScore;
-            bestMovesArr.length = 0; // clear array
-            bestMovesArr.push(move);
-        } else if (evalScore === maxEval) {
-            bestMovesArr.push(move);
+        for (let move of possibleMoves) {
+            if (Date.now() - startTime >= timeLimitMs && currentDepth > 3) {
+                break; // Out of time, rely on previous depth's fully completed results
+            }
+            
+            const newState = state.clone();
+            newState.makeMove(move);
+            const isNextMaximizing = newState.currentPlayer === player;
+            
+            // Call Minimax and pass down TT and Time limits
+            const evalScore = minimax(newState, currentDepth - 1, -Infinity, Infinity, isNextMaximizing, player, tt, startTime, timeLimitMs);
+            
+            if (evalScore > maxEval) {
+                maxEval = evalScore;
+                currentDepthBestMoves = [move];
+            } else if (evalScore === maxEval) {
+                currentDepthBestMoves.push(move);
+            }
         }
+        
+        if (currentDepthBestMoves.length > 0) {
+            bestMovesArr = currentDepthBestMoves;
+            absoluteBestEval = maxEval;
+            
+            // Re-order the best moves to the front for the next iteration step (Principal Variation ordering logic)
+            const bestMoveSet = new Set(bestMovesArr);
+            possibleMoves.sort((a, b) => (bestMoveSet.has(b) ? 1 : 0) - (bestMoveSet.has(a) ? 1 : 0));
+        }
+        
+        if (absoluteBestEval > 9000) break; // Found a winning path!
+        if (Date.now() - startTime >= timeLimitMs) break; // Out of time, stop iterating deeper
+        
+        currentDepth++;
     }
     
-    // Pick random among the best moves to add variety
+    // Pick randomly among the absolute best moves to add variety
     return bestMovesArr[Math.floor(Math.random() * bestMovesArr.length)];
 }
 
@@ -144,8 +177,35 @@ function getBestMoveMCTS(rootState, rootPlayer, iterations) {
     return bestChild.move;
 }
 
-function minimax(state, depth, alpha, beta, isMaximizing, player) {
+// Hashing function for Transposition Tables
+function hashState(state, isMaximizing) {
+    // Unique string representing the game board state. 
+    return state.board.join(',') + '|' + state.kazans.join(',') + '|' + state.tuzdyks.join(',') + '|' + isMaximizing;
+}
+
+function minimax(state, depth, alpha, beta, isMaximizing, player, tt, startTime, timeLimitMs) {
+    const hash = hashState(state, isMaximizing);
+    
+    // Transposition Table Lookup
+    if (tt.has(hash)) {
+        const entry = tt.get(hash);
+        if (entry.depth >= depth) {
+            if (entry.flag === 'EXACT') return entry.value;
+            if (entry.flag === 'LOWERBOUND') alpha = Math.max(alpha, entry.value);
+            if (entry.flag === 'UPPERBOUND') beta = Math.min(beta, entry.value);
+            if (alpha >= beta) return entry.value;
+        }
+    }
+
     if (depth === 0 || state.isGameOver) {
+        const val = evaluateBoard(state, player);
+        // Cache leaf nodes
+        tt.set(hash, { value: val, depth, flag: 'EXACT' });
+        return val;
+    }
+    
+    // Time constraint bailout
+    if (Date.now() - startTime > timeLimitMs) {
         return evaluateBoard(state, player);
     }
     
@@ -153,31 +213,33 @@ function minimax(state, depth, alpha, beta, isMaximizing, player) {
     const possibleMoves = state.getPossibleMoves(state.currentPlayer);
     possibleMoves.sort((a, b) => state.board[b] - state.board[a]);
     
-    if (isMaximizing) {
-        let maxEval = -Infinity;
-        for (let move of possibleMoves) {
-            const newState = state.clone();
-            newState.makeMove(move);
-            const isNextMaximizing = newState.currentPlayer === player;
-            const ev = minimax(newState, depth - 1, alpha, beta, isNextMaximizing, player);
-            maxEval = Math.max(maxEval, ev);
-            alpha = Math.max(alpha, ev);
-            if (beta <= alpha) break;
+    let bestVal = isMaximizing ? -Infinity : Infinity;
+    let originalAlpha = alpha;
+
+    for (let move of possibleMoves) {
+        const newState = state.clone();
+        newState.makeMove(move);
+        const isNextMaximizing = newState.currentPlayer === player;
+        const ev = minimax(newState, depth - 1, alpha, beta, isNextMaximizing, player, tt, startTime, timeLimitMs);
+        
+        if (isMaximizing) {
+            bestVal = Math.max(bestVal, ev);
+            alpha = Math.max(alpha, bestVal);
+        } else {
+            bestVal = Math.min(bestVal, ev);
+            beta = Math.min(beta, bestVal);
         }
-        return maxEval;
-    } else {
-        let minEval = Infinity;
-        for (let move of possibleMoves) {
-            const newState = state.clone();
-            newState.makeMove(move);
-            const isNextMaximizing = newState.currentPlayer === player;
-            const ev = minimax(newState, depth - 1, alpha, beta, isNextMaximizing, player);
-            minEval = Math.min(minEval, ev);
-            beta = Math.min(beta, ev);
-            if (beta <= alpha) break; // Alpha Beta Pruning
-        }
-        return minEval;
+        if (beta <= alpha) break; // Alpha Beta Pruning
     }
+    
+    // Save evaluated node to Transposition Table
+    let flag = 'EXACT';
+    if (bestVal <= originalAlpha) flag = 'UPPERBOUND';
+    else if (bestVal >= beta) flag = 'LOWERBOUND';
+    
+    tt.set(hash, { value: bestVal, depth, flag });
+    
+    return bestVal;
 }
 
 function evaluateBoard(state, player) {
