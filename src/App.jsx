@@ -86,7 +86,7 @@ function App() {
                     iterations: 20000 // Send to python to do Heavy lifting
                 };
                 
-                fetch('http://localhost:5000/api/best-move', {
+                fetch('https://togyz.onrender.com/api/best-move', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
