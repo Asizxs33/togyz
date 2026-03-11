@@ -55,15 +55,40 @@ def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=30
             node.children.append(child_node)
             node = child_node
 
-        # 3. Simulation
+        # 3. Simulation (Heuristic Rollout)
         simulation_state = state.clone()
         sim_depth = 0
         while not simulation_state.isGameOver and sim_depth < 100:
             possible_moves = simulation_state.getPossibleMoves(simulation_state.currentPlayer)
             if not possible_moves:
                 break
-            random_move = random.choice(possible_moves)
-            simulation_state.makeMove(random_move)
+                
+            # Heuristic Rollout: 80% chance to pick a move that captures, 20% random
+            chosen_move = None
+            if random.random() < 0.8:
+                # Try to find a capturing move quickly
+                best_sim_move = None
+                max_cap = -1
+                for m in possible_moves:
+                    stones = simulation_state.board[m]
+                    if stones == 0: continue
+                    # Approximate landing pocket:
+                    landing = (m + stones) % 18 if stones > 1 else (m + 1) % 18
+                    # If landing on opponent side and making it even:
+                    opp_start = (1 - simulation_state.currentPlayer) * 9
+                    if opp_start <= landing < opp_start + 9:
+                        future_stones = simulation_state.board[landing] + 1
+                        if future_stones % 2 == 0:
+                            if future_stones > max_cap:
+                                max_cap = future_stones
+                                best_sim_move = m
+                if best_sim_move is not None:
+                    chosen_move = best_sim_move
+
+            if chosen_move is None:
+                chosen_move = random.choice(possible_moves)
+                
+            simulation_state.makeMove(chosen_move)
             sim_depth += 1
 
         # 4. Backpropagation (with Heuristics)
