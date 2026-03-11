@@ -83,7 +83,7 @@ function App() {
                     isGameOver: gameState.isGameOver,
                     winner: gameState.winner,
                     algorithm: 'mcts',
-                    iterations: 20000 // Send to python to do Heavy lifting
+                    iterations: 3000 // Reduced from 20000 to prevent server timeout
                 };
                 
                 fetch('https://togyz.onrender.com/api/best-move', {
