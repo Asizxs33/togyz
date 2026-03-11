@@ -89,6 +89,25 @@ def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=30
             opp_tuzdyks = 1 if simulation_state.tuzdyks[1 - root_player] != -1 else 0
             score_diff += (my_tuzdyks - opp_tuzdyks) * 50
             
+            # Principles 4, 5, 6: Advanced evaluating
+            my_start = root_player * 9
+            opp_start = (1 - root_player) * 9
+            
+            # Principle 4: Vulnerability (minimize opponent's even pockets, maximize own opportunities)
+            my_vulnerability = sum(1 for i in range(my_start, my_start + 9) if simulation_state.board[i] > 0 and simulation_state.board[i] % 2 == 0)
+            opp_vulnerability = sum(1 for i in range(opp_start, opp_start + 9) if simulation_state.board[i] > 0 and simulation_state.board[i] % 2 == 0)
+            score_diff += (opp_vulnerability - my_vulnerability) * 3
+            
+            # Principle 6: Central control (pockets 4,5,6 -> indices 3,4,5 from start)
+            my_center_stones = sum(simulation_state.board[my_start + i] for i in range(3, 6))
+            opp_center_stones = sum(simulation_state.board[opp_start + i] for i in range(3, 6))
+            score_diff += (my_center_stones - opp_center_stones) * 0.5
+            
+            # Principle 5: Mobility (Atsyrau)
+            my_mobility = sum(simulation_state.board[my_start:my_start+9])
+            opp_mobility = sum(simulation_state.board[opp_start:opp_start+9])
+            score_diff += (my_mobility - opp_mobility) * 0.5
+            
             # Sigmoid-like mapping: Diff of +20 gives high probability (~0.9), 0 gives 0.5
             result = 1.0 / (1.0 + math.exp(-score_diff / 15.0))
 
