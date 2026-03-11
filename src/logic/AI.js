@@ -7,8 +7,22 @@ export function calculateBestMove(state, depth, player, algorithm = 'minimax') {
     // --- STANDARD MINIMAX ---
     let maxEval = -Infinity;
     
-    const possibleMoves = state.getPossibleMoves(player);
+    let possibleMoves = state.getPossibleMoves(player);
     if (possibleMoves.length === 0) return -1;
+    
+    // Dynamic Depth: Increase depth in endgame when total stones are low
+    let totalStones = 0;
+    for (let i = 0; i < 18; i++) totalStones += state.board[i];
+    
+    let activeDepth = parseInt(depth);
+    if (activeDepth >= 4) {
+        if (totalStones < 50) activeDepth += 1;
+        if (totalStones < 30) activeDepth += 2;
+        if (totalStones < 15) activeDepth += 3;
+    }
+    
+    // Move Ordering: Evaluate pockets with the most stones first to maximize alpha-beta pruning
+    possibleMoves.sort((a, b) => state.board[b] - state.board[a]);
     
     const bestMovesArr = [];
 
@@ -18,7 +32,7 @@ export function calculateBestMove(state, depth, player, algorithm = 'minimax') {
         
         const isNextMaximizing = newState.currentPlayer === player;
         
-        const evalScore = minimax(newState, depth - 1, -Infinity, Infinity, isNextMaximizing, player);
+        const evalScore = minimax(newState, activeDepth - 1, -Infinity, Infinity, isNextMaximizing, player);
         
         if (evalScore > maxEval) {
             maxEval = evalScore;
@@ -135,7 +149,9 @@ function minimax(state, depth, alpha, beta, isMaximizing, player) {
         return evaluateBoard(state, player);
     }
     
+    // Move Ordering: Evaluate pockets with the most stones first to maximize alpha-beta pruning
     const possibleMoves = state.getPossibleMoves(state.currentPlayer);
+    possibleMoves.sort((a, b) => state.board[b] - state.board[a]);
     
     if (isMaximizing) {
         let maxEval = -Infinity;
