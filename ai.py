@@ -31,6 +31,13 @@ class MCTSNode:
 
 def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=3000, max_time_seconds=3.0):
     import time
+    
+    # 1. OPENING BOOK
+    total_stones = sum(root_state.board)
+    if total_stones == 162 and root_state.currentPlayer == 0:
+        # Standard optimal openings for White are Pit 7 or Pit 9 (indices 6 or 8)
+        return random.choice([6, 8])
+        
     root_node = MCTSNode(root_state)
 
     start_time = time.time()
