@@ -29,10 +29,15 @@ class MCTSNode:
 
         return random.choice(best_children)
 
-def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=10000):
+def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=3000, max_time_seconds=3.0):
+    import time
     root_node = MCTSNode(root_state)
 
-    for i in range(iterations):
+    start_time = time.time()
+    iters = 0
+
+    # Stop either when reaching iterations limit or time limit
+    while iters < iterations and (time.time() - start_time) < max_time_seconds:
         node = root_node
         state = root_state.clone()
 
@@ -76,6 +81,8 @@ def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=10
             node.wins += result
             result = 1.0 - result
             node = node.parent
+            
+        iters += 1
 
     if not root_node.children:
         return -1
