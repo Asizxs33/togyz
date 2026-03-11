@@ -66,15 +66,31 @@ def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=30
             simulation_state.makeMove(random_move)
             sim_depth += 1
 
-        # 4. Backpropagation
-        won = False
-        if simulation_state.winner == root_player:
-            won = True
-        
-        if simulation_state.winner is None or simulation_state.winner == -1:
-            result = 0.5
+        # 4. Backpropagation (with Heuristics)
+        if simulation_state.isGameOver:
+            if simulation_state.winner == root_player:
+                result = 1.0 # Win
+            elif simulation_state.winner == -1:
+                result = 0.5 # Draw
+            else:
+                result = 0.0 # Loss
         else:
-            result = 1.0 if won else 0.0
+            # Game didn't finish within random rollout. Use heuristics to estimate win probability.
+            my_score = simulation_state.kazans[root_player]
+            opp_score = simulation_state.kazans[1 - root_player]
+            
+            # 81 is winning score. We map the score difference to a probability between 0 and 1
+            # If my_score is much higher, result approaches 1.0
+            score_diff = my_score - opp_score
+            
+            # Include tuzdyk advantage: each tuzdyk is worth roughly +5 points
+            my_tuzdyks = 1 if simulation_state.tuzdyks[root_player] != -1 else 0
+            opp_tuzdyks = 1 if simulation_state.tuzdyks[1 - root_player] != -1 else 0
+            score_diff += (my_tuzdyks - opp_tuzdyks) * 5
+            
+            # Sigmoid-like mapping: Diff of +20 gives high probability (~0.9), 0 gives 0.5
+            result = 1.0 / (1.0 + math.exp(-score_diff / 15.0))
+
 
         while node is not None:
             node.visits += 1
