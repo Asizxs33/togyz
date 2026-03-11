@@ -173,11 +173,12 @@ function evaluateBoard(state, player) {
     
     const opponent = 1 - player;
     
-    // Weights for the heuristic function
-    const WEIGHT_K = 10;   // Kazan stones (Most important)
-    const WEIGHT_T = 500;  // Having a Tuzdyk is extremely powerful! Prioritize making stars.
-    const WEIGHT_M = 1;    // Mobility (having stones on your side to make moves)
-    const WEIGHT_V = 2;    // Vulnerability (opponent has pockets with even stones that can be captured)
+    // Weights corresponding to Togyzkumalak principles
+    const WEIGHT_K = 10;   // Principle 1: Maximize Kazans
+    const WEIGHT_T = 500;  // Principle 2: Tuzdyk (Extremely powerful)
+    const WEIGHT_V = 3;    // Principle 4: Vulnerability (Limit opponent's even pockets)
+    const WEIGHT_M = 0.5;  // Principle 5: Mobility (Avoid Atsyrau)
+    const WEIGHT_C = 0.5;  // Principle 6: Central control (pockets 4,5,6)
     
     // 1. K (Kazan)
     const kazanScore = (state.kazans[player] - state.kazans[opponent]) * WEIGHT_K;
@@ -187,24 +188,33 @@ function evaluateBoard(state, player) {
     if (state.tuzdyks[player] !== -1) tuzdykScore += WEIGHT_T;
     if (state.tuzdyks[opponent] !== -1) tuzdykScore -= WEIGHT_T;
     
-    // 3. M (Mobility)
+    // 3. M & C (Mobility & Center Control)
     let myMobility = 0;
+    let myCenter = 0;
     const myStart = player === 0 ? 0 : 9;
     const myEnd = player === 0 ? 8 : 17;
     for (let i = myStart; i <= myEnd; i++) {
         myMobility += state.board[i];
+        if (i >= myStart + 3 && i <= myStart + 5) {
+            myCenter += state.board[i];
+        }
     }
     
     let oppMobility = 0;
+    let oppCenter = 0;
     const oppStart = opponent === 0 ? 0 : 9;
     const oppEnd = opponent === 0 ? 8 : 17;
     for (let i = oppStart; i <= oppEnd; i++) {
         oppMobility += state.board[i];
+        if (i >= oppStart + 3 && i <= oppStart + 5) {
+            oppCenter += state.board[i];
+        }
     }
     const mobilityScore = (myMobility - oppMobility) * WEIGHT_M;
+    const centerScore = (myCenter - oppCenter) * WEIGHT_C;
     
     // 4. V (Vulnerability - count my even pockets vs their even pockets)
-    // A pocket on my side with an even number is vulnerable to the opponent.
+    // Principle 4: limit opponent win probability by limiting evens
     let myVulnerability = 0;
     for (let i = myStart; i <= myEnd; i++) {
         if (state.board[i] > 0 && state.board[i] % 2 === 0) {
@@ -223,5 +233,5 @@ function evaluateBoard(state, player) {
     const vulnerabilityScore = (oppVulnerability - myVulnerability) * WEIGHT_V;
     
     // Total Heuristic Evaluation
-    return kazanScore + tuzdykScore + mobilityScore + vulnerabilityScore;
+    return kazanScore + tuzdykScore + mobilityScore + vulnerabilityScore + centerScore;
 }
