@@ -83,10 +83,11 @@ def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=30
             # If my_score is much higher, result approaches 1.0
             score_diff = my_score - opp_score
             
-            # Include tuzdyk advantage: each tuzdyk is worth roughly +5 points
+            # Include tuzdyk advantage: each tuzdyk is worth WAY MORE (+50 points)
+            # This forces the MCTS to prioritize getting a star over everything else
             my_tuzdyks = 1 if simulation_state.tuzdyks[root_player] != -1 else 0
             opp_tuzdyks = 1 if simulation_state.tuzdyks[1 - root_player] != -1 else 0
-            score_diff += (my_tuzdyks - opp_tuzdyks) * 5
+            score_diff += (my_tuzdyks - opp_tuzdyks) * 50
             
             # Sigmoid-like mapping: Diff of +20 gives high probability (~0.9), 0 gives 0.5
             result = 1.0 / (1.0 + math.exp(-score_diff / 15.0))
