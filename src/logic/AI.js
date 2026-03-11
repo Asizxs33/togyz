@@ -175,7 +175,7 @@ function evaluateBoard(state, player) {
     
     // Weights for the heuristic function
     const WEIGHT_K = 10;   // Kazan stones (Most important)
-    const WEIGHT_T = 15;   // Having a Tuzdyk is very powerful (passive income)
+    const WEIGHT_T = 500;  // Having a Tuzdyk is extremely powerful! Prioritize making stars.
     const WEIGHT_M = 1;    // Mobility (having stones on your side to make moves)
     const WEIGHT_V = 2;    // Vulnerability (opponent has pockets with even stones that can be captured)
     
