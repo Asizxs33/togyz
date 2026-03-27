@@ -83,7 +83,8 @@ function App() {
                     isGameOver: gameState.isGameOver,
                     winner: gameState.winner,
                     algorithm: 'mcts',
-                    iterations: 3000 // Reduced from 20000 to prevent server timeout
+                    iterations: 20000,
+                    max_time_seconds: 3.0
                 };
                 
                 fetch('https://togyz.onrender.com/api/best-move', {
@@ -155,10 +156,10 @@ function App() {
                 <h1>Тоғызқұмалақ</h1>
                 <div className="controls">
                     <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={isBusy}>
-                        <option value="2">Оңай (Easy)</option>
-                        <option value="3">Орташа (Medium)</option>
-                        <option value="5">Қиын (Hard)</option>
-                        <option value="mcts">Экстремалды (MCTS - AI)</option>
+                        <option value="2">Оңай</option>
+                        <option value="3">Орташа</option>
+                        <option value="5">Қиын</option>
+                        <option value="mcts">⚡ Өте Қиын (AI)</option>
                     </select>
                     <button onClick={handleRestart}>Жаңа ойын</button>
                     {isAiThinking && <span className="thinking-indicator">🤖 Компьютер ойлануда...</span>}
