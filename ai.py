@@ -1,160 +1,326 @@
 import math
 import random
+import time
 from game_logic import TogyzkumalakState
 
-class MCTSNode:
+# ─────────────────────────────────────────────────────────────────────────────
+# EVALUATION FUNCTION
+# Returns score from state.currentPlayer's perspective. Higher = better for them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def evaluate(state: TogyzkumalakState) -> float:
+    cur = state.currentPlayer
+    opp = 1 - cur
+    cs = cur * 9
+    os = opp * 9
+
+    # 1. Kazan difference — primary factor
+    ev = (state.kazans[cur] - state.kazans[opp]) * 3.0
+
+    # 2. Tuzdyk advantage (each tuzdyk drains ~1 stone/turn from opponent)
+    my_tuz = state.tuzdyks[cur] != -1
+    opp_tuz = state.tuzdyks[opp] != -1
+    ev += (my_tuz - opp_tuz) * 18.0
+
+    # 3. Capture opportunities: opponent's even-stoned pockets are free targets
+    for i in range(os, os + 9):
+        v = state.board[i]
+        if v > 0 and v % 2 == 0:
+            ev += v * 0.5
+    # Penalty: our own even pockets are vulnerable
+    for i in range(cs, cs + 9):
+        v = state.board[i]
+        if v > 0 and v % 2 == 0:
+            ev -= v * 0.5
+
+    # 4. Tuzdyk opportunity: landing 3 stones on opponent side is huge
+    if not my_tuz:
+        for i in range(os, os + 9):
+            if state.board[i] == 2 and i not in (8, 17):
+                # One capture away from making tuzdyk
+                opp_relative = i % 9
+                opp_tuz_pos = state.tuzdyks[opp]
+                if opp_tuz_pos == -1 or opp_tuz_pos % 9 != opp_relative:
+                    ev += 6.0
+
+    # 5. Stone mobility (more stones = more options, harder to be stranded)
+    ev += (sum(state.board[cs:cs+9]) - sum(state.board[os:os+9])) * 0.1
+
+    return ev
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MOVE ORDERING  (critical for alpha-beta efficiency)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _landing_pocket(state: TogyzkumalakState, m: int) -> int:
+    """Approximate last stone landing pocket for move m."""
+    stones = state.board[m]
+    if stones == 0:
+        return -1
+    return (m + 1) % 18 if stones == 1 else (m + stones - 1) % 18
+
+
+def order_moves(state: TogyzkumalakState, moves: list) -> list:
+    opp = 1 - state.currentPlayer
+    os = opp * 9
+
+    def priority(m: int) -> int:
+        land = _landing_pocket(state, m)
+        if land < 0 or land in state.tuzdyks:
+            return 0
+        if os <= land < os + 9:
+            fut = state.board[land] + 1
+            if fut % 2 == 0:
+                return fut * 10           # direct capture — highest priority
+            if fut == 3 and state.tuzdyks[state.currentPlayer] == -1:
+                is_ninth = land in (8, 17)
+                if not is_ninth:
+                    opp_tuz = state.tuzdyks[opp]
+                    if opp_tuz == -1 or opp_tuz % 9 != land % 9:
+                        return 80         # tuzdyk creation — very high priority
+        return 0
+
+    return sorted(moves, key=priority, reverse=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ALPHA-BETA NEGAMAX with Iterative Deepening
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _Timeout(Exception):
+    pass
+
+
+def _negamax(state: TogyzkumalakState, depth: int,
+             alpha: float, beta: float, deadline: float) -> float:
+    """
+    Returns score from state.currentPlayer's perspective.
+    Uses negamax: score for current player = -score for opponent.
+    """
+    if time.time() > deadline:
+        raise _Timeout()
+
+    if state.isGameOver:
+        cur = state.currentPlayer
+        if state.winner == cur:
+            # Current player already won — shouldn't happen (game ends on prev move),
+            # but handle gracefully
+            return 10000.0 + depth
+        elif state.winner == -1:
+            return 0.0
+        else:
+            # Current player lost (opponent just won on last move)
+            return -(10000.0 + depth)
+
+    if depth == 0:
+        return evaluate(state)
+
+    moves = state.getPossibleMoves(state.currentPlayer)
+    if not moves:
+        return -(10000.0 + depth)
+
+    moves = order_moves(state, moves)
+    best = float('-inf')
+
+    for move in moves:
+        child = state.clone()
+        child.makeMove(move)
+        score = -_negamax(child, depth - 1, -beta, -alpha, deadline)
+        if score > best:
+            best = score
+        if score > alpha:
+            alpha = score
+        if alpha >= beta:
+            break  # Beta cut-off
+
+    return best
+
+
+def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
+                             max_time_seconds: float = 3.0) -> int:
+    """
+    Iterative deepening alpha-beta search.
+    Searches deeper and deeper until the time budget runs out,
+    always returning the best move found so far.
+    """
+    moves = root_state.getPossibleMoves(root_player)
+    if not moves:
+        return -1
+    if len(moves) == 1:
+        return moves[0]
+
+    moves = order_moves(root_state, moves)
+    best_move = moves[0]
+    deadline = time.time() + max_time_seconds * 0.95
+
+    for depth in range(1, 30):
+        try:
+            best_score = float('-inf')
+            alpha = float('-inf')
+            current_best = moves[0]
+
+            for move in moves:
+                child = root_state.clone()
+                child.makeMove(move)
+                score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline)
+                if score > best_score:
+                    best_score = score
+                    current_best = move
+                if score > alpha:
+                    alpha = score
+
+            best_move = current_best
+            # Move best move to front — dramatically improves pruning next iteration
+            moves = [best_move] + [m for m in moves if m != best_move]
+
+            # If we found a forced win/loss, no need to go deeper
+            if abs(best_score) > 9000:
+                break
+
+        except _Timeout:
+            break
+
+    return best_move
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MCTS (kept for hint generator which needs fast ~0.5s response)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _MCTSNode:
+    __slots__ = ('state', 'move', 'parent', 'children', 'wins', 'visits', 'untriedMoves')
+
     def __init__(self, state: TogyzkumalakState, move=None, parent=None):
         self.state = state
         self.move = move
         self.parent = parent
         self.children = []
-        self.wins = 0
+        self.wins = 0.0
         self.visits = 0
         self.untriedMoves = state.getPossibleMoves(state.currentPlayer)
 
-    def get_best_child(self, exploration_param=1.41):
+    def best_child(self, c=1.41):
         best_score = float('-inf')
-        best_children = []
-
+        best = None
+        log_v = math.log(self.visits)
         for child in self.children:
-            exploit = child.wins / child.visits
-            explore = exploration_param * math.sqrt(math.log(self.visits) / child.visits)
-            score = exploit + explore
-
+            score = child.wins / child.visits + c * math.sqrt(log_v / child.visits)
             if score > best_score:
                 best_score = score
-                best_children = [child]
-            elif score == best_score:
-                best_children.append(child)
+                best = child
+        return best
 
-        return random.choice(best_children)
 
-def get_best_move_mcts(root_state: TogyzkumalakState, root_player, iterations=3000, max_time_seconds=3.0):
-    import time
-    
-    # 1. OPENING BOOK
-    total_stones = sum(root_state.board)
-    if total_stones == 162 and root_state.currentPlayer == 0:
-        # Standard optimal openings for White are Pit 7 or Pit 9 (indices 6 or 8)
-        return random.choice([6, 8])
-        
-    root_node = MCTSNode(root_state)
+def _mcts(root_state: TogyzkumalakState, root_player: int,
+          iterations: int, max_time_seconds: float) -> int:
+    root = _MCTSNode(root_state)
+    deadline = time.time() + max_time_seconds
 
-    start_time = time.time()
-    iters = 0
+    for _ in range(iterations):
+        if time.time() > deadline:
+            break
 
-    # Stop either when reaching iterations limit or time limit
-    while iters < iterations and (time.time() - start_time) < max_time_seconds:
-        node = root_node
+        node = root
         state = root_state.clone()
 
-        # 1. Selection
-        while len(node.untriedMoves) == 0 and len(node.children) > 0:
-            node = node.get_best_child()
+        # Selection
+        while not node.untriedMoves and node.children:
+            node = node.best_child()
             state.makeMove(node.move)
 
-        # 2. Expansion
-        if len(node.untriedMoves) > 0:
+        # Expansion
+        if node.untriedMoves:
             move = random.choice(node.untriedMoves)
             node.untriedMoves.remove(move)
             state.makeMove(move)
-            child_node = MCTSNode(state.clone(), move, node)
-            node.children.append(child_node)
-            node = child_node
+            child = _MCTSNode(state.clone(), move, node)
+            node.children.append(child)
+            node = child
 
-        # 3. Simulation (Heuristic Rollout)
-        simulation_state = state.clone()
-        sim_depth = 0
-        while not simulation_state.isGameOver and sim_depth < 100:
-            possible_moves = simulation_state.getPossibleMoves(simulation_state.currentPlayer)
-            if not possible_moves:
+        # Simulation
+        sim = state.clone()
+        for _ in range(150):
+            if sim.isGameOver:
                 break
-                
-            # Heuristic Rollout: 80% chance to pick a move that captures, 20% random
-            chosen_move = None
+            moves = sim.getPossibleMoves(sim.currentPlayer)
+            if not moves:
+                break
+            chosen = None
             if random.random() < 0.8:
-                # Try to find a capturing move quickly
-                best_sim_move = None
-                max_cap = -1
-                for m in possible_moves:
-                    stones = simulation_state.board[m]
-                    if stones == 0: continue
-                    # Approximate landing pocket:
-                    landing = (m + stones) % 18 if stones > 1 else (m + 1) % 18
-                    # If landing on opponent side and making it even:
-                    opp_start = (1 - simulation_state.currentPlayer) * 9
-                    if opp_start <= landing < opp_start + 9:
-                        future_stones = simulation_state.board[landing] + 1
-                        if future_stones % 2 == 0:
-                            if future_stones > max_cap:
-                                max_cap = future_stones
-                                best_sim_move = m
-                if best_sim_move is not None:
-                    chosen_move = best_sim_move
+                os = (1 - sim.currentPlayer) * 9
+                best_m, best_cap = None, -1
+                for m in moves:
+                    stones = sim.board[m]
+                    if not stones:
+                        continue
+                    land = (m + 1) % 18 if stones == 1 else (m + stones - 1) % 18
+                    if land in sim.tuzdyks:
+                        continue
+                    if os <= land < os + 9:
+                        fut = sim.board[land] + 1
+                        if fut % 2 == 0 and fut > best_cap:
+                            best_cap = fut
+                            best_m = m
+                chosen = best_m
+            if chosen is None:
+                chosen = random.choice(moves)
+            sim.makeMove(chosen)
 
-            if chosen_move is None:
-                chosen_move = random.choice(possible_moves)
-                
-            simulation_state.makeMove(chosen_move)
-            sim_depth += 1
-
-        # 4. Backpropagation (with Heuristics)
-        if simulation_state.isGameOver:
-            if simulation_state.winner == root_player:
-                result = 1.0 # Win
-            elif simulation_state.winner == -1:
-                result = 0.5 # Draw
+        # Evaluate
+        if sim.isGameOver:
+            if sim.winner == root_player:
+                result = 1.0
+            elif sim.winner == -1:
+                result = 0.5
             else:
-                result = 0.0 # Loss
+                result = 0.0
         else:
-            # Game didn't finish within random rollout. Use heuristics to estimate win probability.
-            my_score = simulation_state.kazans[root_player]
-            opp_score = simulation_state.kazans[1 - root_player]
-            
-            # 81 is winning score. We map the score difference to a probability between 0 and 1
-            # If my_score is much higher, result approaches 1.0
-            score_diff = my_score - opp_score
-            
-            # Include tuzdyk advantage: each tuzdyk is worth WAY MORE (+50 points)
-            # This forces the MCTS to prioritize getting a star over everything else
-            my_tuzdyks = 1 if simulation_state.tuzdyks[root_player] != -1 else 0
-            opp_tuzdyks = 1 if simulation_state.tuzdyks[1 - root_player] != -1 else 0
-            score_diff += (my_tuzdyks - opp_tuzdyks) * 50
-            
-            # Principles 4, 5, 6: Advanced evaluating
-            my_start = root_player * 9
-            opp_start = (1 - root_player) * 9
-            
-            # Principle 4: Vulnerability (minimize opponent's even pockets, maximize own opportunities)
-            my_vulnerability = sum(1 for i in range(my_start, my_start + 9) if simulation_state.board[i] > 0 and simulation_state.board[i] % 2 == 0)
-            opp_vulnerability = sum(1 for i in range(opp_start, opp_start + 9) if simulation_state.board[i] > 0 and simulation_state.board[i] % 2 == 0)
-            score_diff += (opp_vulnerability - my_vulnerability) * 3
-            
-            # Principle 6: Central control (pockets 4,5,6 -> indices 3,4,5 from start)
-            my_center_stones = sum(simulation_state.board[my_start + i] for i in range(3, 6))
-            opp_center_stones = sum(simulation_state.board[opp_start + i] for i in range(3, 6))
-            score_diff += (my_center_stones - opp_center_stones) * 0.5
-            
-            # Principle 5: Mobility (Atsyrau)
-            my_mobility = sum(simulation_state.board[my_start:my_start+9])
-            opp_mobility = sum(simulation_state.board[opp_start:opp_start+9])
-            score_diff += (my_mobility - opp_mobility) * 0.5
-            
-            # Sigmoid-like mapping: Diff of +20 gives high probability (~0.9), 0 gives 0.5
-            result = 1.0 / (1.0 + math.exp(-score_diff / 15.0))
+            my = sim.kazans[root_player]
+            op = sim.kazans[1 - root_player]
+            diff = (my - op) * 2.0
+            diff += (int(sim.tuzdyks[root_player] != -1) - int(sim.tuzdyks[1 - root_player] != -1)) * 20
+            result = 1.0 / (1.0 + math.exp(-diff / 15.0))
 
+        # Backpropagation (player-aware)
+        bp = node
+        while bp is not None:
+            bp.visits += 1
+            mover = 1 - bp.state.currentPlayer
+            bp.wins += result if mover == root_player else (1.0 - result)
+            bp = bp.parent
 
-        while node is not None:
-            node.visits += 1
-            node.wins += result
-            result = 1.0 - result
-            node = node.parent
-            
-        iters += 1
-
-    if not root_node.children:
+    if not root.children:
         return -1
+    return max(root.children, key=lambda c: c.visits).move
 
-    # Choose the child with the most visits
-    best_child = max(root_node.children, key=lambda c: c.visits)
-    return best_child.move
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUBLIC API (called by app.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+OPENING_BOOK = {
+    # (total_stones, currentPlayer): [best moves]
+    (162, 0): [6, 8],
+    (162, 1): [9, 11, 13],
+}
+
+
+def get_best_move_mcts(root_state: TogyzkumalakState, root_player: int,
+                        iterations: int = 20000,
+                        max_time_seconds: float = 3.0) -> int:
+    """
+    Main entry point. Uses Alpha-Beta for strong play.
+    Falls back to MCTS for very fast (hint) calls under 1 second.
+    """
+    # Opening book
+    key = (sum(root_state.board), root_state.currentPlayer)
+    if key in OPENING_BOOK:
+        return random.choice(OPENING_BOOK[key])
+
+    # Fast hint calls → use MCTS (Alpha-Beta is too slow at <0.5s)
+    if max_time_seconds < 1.0:
+        return _mcts(root_state, root_player, iterations, max_time_seconds)
+
+    # Full strength → Alpha-Beta
+    return get_best_move_alphabeta(root_state, root_player, max_time_seconds)
