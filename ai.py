@@ -1,7 +1,59 @@
 import math
 import random
 import time
+import os
 from game_logic import TogyzkumalakState
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEURAL NETWORK — loaded once at startup if model_weights.npz exists
+# ─────────────────────────────────────────────────────────────────────────────
+
+_nn = None   # dict of numpy weight arrays, or None
+
+def _load_nn():
+    global _nn
+    path = os.path.join(os.path.dirname(__file__), 'model_weights.npz')
+    if not os.path.exists(path):
+        return
+    try:
+        import numpy as np
+        data = np.load(path)
+        _nn = {k: data[k] for k in data.files}
+        print(f"[AI] Neural network loaded ({path})", flush=True)
+    except Exception as e:
+        print(f"[AI] Could not load neural network: {e}", flush=True)
+
+_load_nn()
+
+
+def _nn_features(state: TogyzkumalakState):
+    """25-dim feature vector from current player's perspective."""
+    import numpy as np
+    cur, opp = state.currentPlayer, 1 - state.currentPlayer
+    cs, os_ = cur * 9, opp * 9
+    f = np.empty(25, dtype=np.float32)
+    for i in range(9):
+        f[i]     = state.board[cs + i]  / 20.0
+        f[9 + i] = state.board[os_ + i] / 20.0
+    f[18] = state.kazans[cur] / 162.0
+    f[19] = state.kazans[opp] / 162.0
+    f[20] = (state.kazans[cur] - state.kazans[opp]) / 162.0
+    f[21] = 1.0 if state.tuzdyks[cur] != -1 else 0.0
+    f[22] = 1.0 if state.tuzdyks[opp] != -1 else 0.0
+    f[23] = (state.tuzdyks[cur]  % 9) / 8.0 if state.tuzdyks[cur]  != -1 else -1.0
+    f[24] = (state.tuzdyks[opp] % 9) / 8.0 if state.tuzdyks[opp] != -1 else -1.0
+    return f
+
+
+def _nn_eval(state: TogyzkumalakState) -> float:
+    """Returns value in [-1, 1] from current player's perspective."""
+    import numpy as np
+    w = _nn
+    x = _nn_features(state)
+    h1  = np.maximum(0.0, x  @ w['W1'] + w['b1'])
+    h2  = np.maximum(0.0, h1 @ w['W2'] + w['b2'])
+    out = float(np.tanh(h2 @ w['W3'] + w['b3']))
+    return out
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CORE HELPER: simulate sowing without modifying state
@@ -50,6 +102,18 @@ def _simulate_sow(board, tuzdyks, m):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate(state: TogyzkumalakState) -> float:
+    # If neural network is loaded, blend NN + heuristic
+    # (blend keeps tactical sharpness from heuristic while NN improves strategic play)
+    if _nn is not None:
+        nn_val  = _nn_eval(state)           # [-1, 1]
+        hval    = _evaluate_heuristic(state)
+        # Scale NN to same range as heuristic, then blend 60/40
+        return 0.6 * nn_val * 120.0 + 0.4 * hval
+
+    return _evaluate_heuristic(state)
+
+
+def _evaluate_heuristic(state: TogyzkumalakState) -> float:
     cur = state.currentPlayer
     opp = 1 - cur
     cs = cur * 9
