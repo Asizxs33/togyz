@@ -313,8 +313,8 @@ def _quiescence(state: TogyzkumalakState, alpha: float, beta: float,
     if time.time() > deadline:
         raise _Timeout()
 
-    # Use fast heuristic only (no NN) — allows much deeper quiescence in same time
-    stand_pat = _evaluate_heuristic(state)
+    # Full evaluate (NN + heuristic blend) for accurate stand-pat
+    stand_pat = evaluate(state)
     if stand_pat >= beta:
         return beta
     if stand_pat > alpha:

@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from game_logic import TogyzkumalakState
-from ai import get_best_move_mcts
+from ai import get_best_move_alphabeta
 
 app = Flask(__name__)
 # Enable CORS for the React app port
@@ -27,16 +27,8 @@ def best_move():
 
     # Determine move
     best_move_index = -1
-    if algorithm == 'mcts':
-        iterations = data.get('iterations', 20000)
-        max_time = data.get('max_time_seconds', 3.0)
-        best_move_index = get_best_move_mcts(state, state.currentPlayer, iterations, max_time)
-    else:
-        # Fallback to pure random if algorithm is weird
-        moves = state.getPossibleMoves(state.currentPlayer)
-        import random
-        if moves:
-            best_move_index = random.choice(moves)
+    max_time = data.get('max_time_seconds', 3.0)
+    best_move_index = get_best_move_alphabeta(state, state.currentPlayer, max_time)
 
     return jsonify({"move": best_move_index})
 
