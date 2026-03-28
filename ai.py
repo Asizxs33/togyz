@@ -25,6 +25,23 @@ def _load_nn():
 
 _load_nn()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TRANSPOSITION TABLE — cache previously evaluated positions
+# Key: compact board state tuple.  Value: (depth, score, flag, best_move)
+# ─────────────────────────────────────────────────────────────────────────────
+_TT: dict = {}
+_TT_EXACT, _TT_LOWER, _TT_UPPER = 0, 1, 2
+_TT_MAX = 300_000   # max entries; evict by clearing when full
+
+def _tt_key(state: TogyzkumalakState):
+    return (tuple(state.board),
+            state.kazans[0], state.kazans[1],
+            state.tuzdyks[0], state.tuzdyks[1],
+            state.currentPlayer)
+
+# Killer moves: 2 per ply (distance from root), up to ply 32
+_killers: list = [[None, None] for _ in range(32)]
+
 
 def _nn_features(state: TogyzkumalakState):
     """25-dim feature vector from current player's perspective."""
@@ -119,13 +136,23 @@ def _evaluate_heuristic(state: TogyzkumalakState) -> float:
     cs = cur * 9
     os = opp * 9
 
-    # 1. Kazan difference — primary (increased weight)
-    ev = (state.kazans[cur] - state.kazans[opp]) * 4.0
+    # 1. Kazan difference — scales up as board empties (late-game precision)
+    total_on_board = sum(state.board)
+    kazan_weight = 4.0 + (1.0 - total_on_board / 162.0) * 5.0  # 4→9 as board empties
+    ev = (state.kazans[cur] - state.kazans[opp]) * kazan_weight
 
     # 2. Tuzdyk advantage
     my_tuz = state.tuzdyks[cur] != -1
     opp_tuz = state.tuzdyks[opp] != -1
     ev += (my_tuz - opp_tuz) * 35.0
+
+    # 2b. Tuzdyk position quality: center tuzdyk (pos 3-5) captures more on average
+    if my_tuz:
+        tpos = state.tuzdyks[cur] % 9
+        ev += (4 - abs(tpos - 4)) * 3.0   # center=+12, edge=0
+    if opp_tuz:
+        tpos = state.tuzdyks[opp] % 9
+        ev -= (4 - abs(tpos - 4)) * 3.0
 
     # 3. Tuzdyk DANGER: stones we'd donate to opponent's tuzdyk
     opp_tuz_pos = state.tuzdyks[opp]
@@ -282,11 +309,12 @@ def order_moves(state: TogyzkumalakState, moves: list) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _quiescence(state: TogyzkumalakState, alpha: float, beta: float,
-                deadline: float, qdepth: int = 4) -> float:
+                deadline: float, qdepth: int = 6) -> float:
     if time.time() > deadline:
         raise _Timeout()
 
-    stand_pat = evaluate(state)
+    # Use fast heuristic only (no NN) — allows much deeper quiescence in same time
+    stand_pat = _evaluate_heuristic(state)
     if stand_pat >= beta:
         return beta
     if stand_pat > alpha:
@@ -328,9 +356,25 @@ class _Timeout(Exception):
 
 
 def _negamax(state: TogyzkumalakState, depth: int,
-             alpha: float, beta: float, deadline: float) -> float:
+             alpha: float, beta: float, deadline: float, ply: int = 0) -> float:
     if time.time() > deadline:
         raise _Timeout()
+
+    orig_alpha = alpha
+
+    # ── Transposition Table lookup ────────────────────────────────────────
+    key = _tt_key(state)
+    entry = _TT.get(key)
+    if entry is not None and entry[0] >= depth:
+        tt_d, tt_s, tt_f, tt_mv = entry
+        if tt_f == _TT_EXACT:
+            return tt_s
+        elif tt_f == _TT_LOWER:
+            alpha = max(alpha, tt_s)
+        elif tt_f == _TT_UPPER:
+            beta  = min(beta,  tt_s)
+        if alpha >= beta:
+            return tt_s
 
     if state.isGameOver:
         if state.winner == state.currentPlayer:
@@ -341,7 +385,6 @@ def _negamax(state: TogyzkumalakState, depth: int,
             return -(10000.0 + depth)
 
     if depth == 0:
-        # Quiescence: don't stop at a tactically volatile position
         return _quiescence(state, alpha, beta, deadline)
 
     moves = state.getPossibleMoves(state.currentPlayer)
@@ -349,24 +392,56 @@ def _negamax(state: TogyzkumalakState, depth: int,
         return -(10000.0 + depth)
 
     moves = order_moves(state, moves)
-    best = float('-inf')
+
+    # ── Promote killer moves to front ────────────────────────────────────
+    if ply < 32:
+        k0, k1 = _killers[ply]
+        if k1 is not None and k1 in moves:
+            moves.remove(k1); moves.insert(0, k1)
+        if k0 is not None and k0 in moves:
+            moves.remove(k0); moves.insert(0, k0)
+
+    best      = float('-inf')
+    best_move = moves[0]
 
     for move in moves:
         child = state.clone()
         child.makeMove(move)
-        score = -_negamax(child, depth - 1, -beta, -alpha, deadline)
+        score = -_negamax(child, depth - 1, -beta, -alpha, deadline, ply + 1)
         if score > best:
             best = score
+            best_move = move
         if score > alpha:
             alpha = score
         if alpha >= beta:
+            # Beta cutoff — store as killer move for this ply
+            if ply < 32:
+                k = _killers[ply]
+                if k[0] != move:
+                    k[1] = k[0]
+                    k[0] = move
             break
+
+    # ── Store in Transposition Table ─────────────────────────────────────
+    if len(_TT) < _TT_MAX:
+        if best <= orig_alpha:
+            flag = _TT_UPPER
+        elif best >= beta:
+            flag = _TT_LOWER
+        else:
+            flag = _TT_EXACT
+        _TT[key] = (depth, best, flag, best_move)
 
     return best
 
 
 def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
                              max_time_seconds: float = 3.0) -> int:
+    global _TT, _killers
+    # Fresh search per move — clear TT and killers
+    _TT = {}
+    _killers = [[None, None] for _ in range(32)]
+
     moves = root_state.getPossibleMoves(root_player)
     if not moves:
         return -1
@@ -374,30 +449,57 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
         return moves[0]
 
     moves = order_moves(root_state, moves)
-    best_move = moves[0]
-    final_scores = {}   # move → score from last completed depth
-    deadline = time.time() + max_time_seconds * 0.95
+    best_move   = moves[0]
+    final_scores: dict = {}
+    deadline    = time.time() + max_time_seconds * 0.95
+    prev_score  = 0.0
 
-    for depth in range(1, 30):
+    for depth in range(1, 32):
         try:
-            best_score = float('-inf')
-            alpha = float('-inf')
+            best_score   = float('-inf')
             current_best = moves[0]
-            depth_scores = {}
+            depth_scores: dict = {}
 
+            # Aspiration window: narrow search centred on previous depth's score
+            asp   = 20.0 if depth > 3 else float('inf')
+            a_lo  = prev_score - asp
+            alpha = a_lo
+
+            retry = False
             for move in moves:
                 child = root_state.clone()
                 child.makeMove(move)
-                score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline)
+                score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline, ply=1)
                 depth_scores[move] = score
                 if score > best_score:
-                    best_score = score
+                    best_score   = score
                     current_best = move
                 if score > alpha:
                     alpha = score
 
-            best_move = current_best
+            # Aspiration failed (score outside window) → re-search full window
+            if asp < float('inf') and best_score <= a_lo:
+                retry = True
+
+            if retry:
+                best_score   = float('-inf')
+                alpha        = float('-inf')
+                current_best = moves[0]
+                for move in moves:
+                    child = root_state.clone()
+                    child.makeMove(move)
+                    score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline, ply=1)
+                    depth_scores[move] = score
+                    if score > best_score:
+                        best_score   = score
+                        current_best = move
+                    if score > alpha:
+                        alpha = score
+
+            prev_score   = best_score
+            best_move    = current_best
             final_scores = depth_scores
+            # Move best move to front for next iteration (move ordering)
             moves = [best_move] + [m for m in moves if m != best_move]
 
             if abs(best_score) > 9000:
@@ -406,13 +508,10 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
         except _Timeout:
             break
 
-    # Among moves within 3 pts of best, pick randomly to avoid repetition.
-    # This makes the AI less predictable under equal pressure.
+    # Diversity: among moves within 3 pts of best, pick randomly
     if final_scores:
-        best_score = final_scores.get(best_move, float('-inf'))
-        epsilon = 3.0
-        candidates = [m for m, s in final_scores.items()
-                      if s >= best_score - epsilon]
+        bs = final_scores.get(best_move, float('-inf'))
+        candidates = [m for m, s in final_scores.items() if s >= bs - 3.0]
         if len(candidates) > 1:
             best_move = random.choice(candidates)
 
