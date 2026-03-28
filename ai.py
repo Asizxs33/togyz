@@ -18,8 +18,18 @@ def _load_nn():
     try:
         import numpy as np
         data = np.load(path)
-        _nn = {k: data[k] for k in data.files}
-        print(f"[AI] Neural network loaded ({path})", flush=True)
+        weights = {k: data[k] for k in data.files}
+        # Check architecture compatibility: W1 must accept 34-dim input
+        if weights['W1'].shape[0] != 34:
+            print(f"[AI] Weights are v1 (25-dim), skipping NN — retrain with train_ai.py", flush=True)
+            return
+        _nn = weights
+        arch = f"{weights['W1'].shape[0]}→{weights['W1'].shape[1]}→{weights['W2'].shape[1]}"
+        if 'W4' in weights:
+            arch += f"→{weights['W3'].shape[1]}→1"
+        else:
+            arch += "→1"
+        print(f"[AI] Neural network loaded: {arch}", flush=True)
     except Exception as e:
         print(f"[AI] Could not load neural network: {e}", flush=True)
 
@@ -44,14 +54,16 @@ _killers: list = [[None, None] for _ in range(32)]
 
 
 def _nn_features(state: TogyzkumalakState):
-    """25-dim feature vector from current player's perspective."""
+    """34-dim feature vector from current player's perspective (v2)."""
     import numpy as np
     cur, opp = state.currentPlayer, 1 - state.currentPlayer
     cs, os_ = cur * 9, opp * 9
-    f = np.empty(25, dtype=np.float32)
+    f = np.empty(34, dtype=np.float32)
+
     for i in range(9):
         f[i]     = state.board[cs + i]  / 20.0
         f[9 + i] = state.board[os_ + i] / 20.0
+
     f[18] = state.kazans[cur] / 162.0
     f[19] = state.kazans[opp] / 162.0
     f[20] = (state.kazans[cur] - state.kazans[opp]) / 162.0
@@ -59,17 +71,50 @@ def _nn_features(state: TogyzkumalakState):
     f[22] = 1.0 if state.tuzdyks[opp] != -1 else 0.0
     f[23] = (state.tuzdyks[cur]  % 9) / 8.0 if state.tuzdyks[cur]  != -1 else -1.0
     f[24] = (state.tuzdyks[opp] % 9) / 8.0 if state.tuzdyks[opp] != -1 else -1.0
+
+    f[25] = sum(1 for i in range(os_, os_+9)
+                if state.board[i] > 0 and state.board[i] % 2 == 0) / 9.0
+    f[26] = sum(1 for i in range(cs, cs+9)
+                if state.board[i] > 0 and state.board[i] % 2 == 0) / 9.0
+    f[27] = sum(state.board) / 162.0
+
+    f[28] = 0.0
+    if state.tuzdyks[cur] == -1:
+        for i in range(os_, os_+9):
+            if state.board[i] == 2 and i not in (8, 17):
+                if state.tuzdyks[opp] == -1 or state.tuzdyks[opp] % 9 != i % 9:
+                    f[28] = 1.0; break
+
+    f[29] = 0.0
+    if state.tuzdyks[opp] == -1:
+        for i in range(cs, cs+9):
+            if state.board[i] == 2 and i not in (8, 17):
+                if state.tuzdyks[cur] == -1 or state.tuzdyks[cur] % 9 != i % 9:
+                    f[29] = 1.0; break
+
+    f[30] = sum(state.board[i] for i in range(os_, os_+9)
+                if state.board[i] > 0 and state.board[i] % 2 == 0) / 162.0
+    f[31] = sum(state.board[i] for i in range(cs, cs+9)
+                if state.board[i] > 0 and state.board[i] % 2 == 0) / 162.0
+    f[32] = sum(state.board[cs:cs+9]) / 162.0
+    f[33] = sum(state.board[os_:os_+9]) / 162.0
+
     return f
 
 
 def _nn_eval(state: TogyzkumalakState) -> float:
-    """Returns value in [-1, 1] from current player's perspective."""
+    """Returns value in [-1, 1] from current player's perspective (v2 — 3 hidden layers)."""
     import numpy as np
     w = _nn
-    x = _nn_features(state)
-    h1  = np.maximum(0.0, x  @ w['W1'] + w['b1'])
-    h2  = np.maximum(0.0, h1 @ w['W2'] + w['b2'])
-    out = float(np.tanh(h2 @ w['W3'] + w['b3']))
+    x  = _nn_features(state)
+    # Support both old 2-layer (W3/b3 output) and new 3-layer (W4/b4 output)
+    h1 = np.maximum(0.0, x  @ w['W1'] + w['b1'])
+    h2 = np.maximum(0.0, h1 @ w['W2'] + w['b2'])
+    if 'W4' in w:
+        h3  = np.maximum(0.0, h2 @ w['W3'] + w['b3'])
+        out = float(np.tanh(h3 @ w['W4'] + w['b4']))
+    else:
+        out = float(np.tanh(h2 @ w['W3'] + w['b3']))
     return out
 
 # ─────────────────────────────────────────────────────────────────────────────
