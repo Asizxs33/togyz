@@ -393,10 +393,7 @@ h1 {
   margin-top: 0;
 }
 
-/* ===== LANDSCAPE MOBILE (phones horizontal) =====
-   Layout: [AI column] | [Kazans] | [Player column]
-   Pockets run top→bottom, board is tall not wide.
-*/
+/* ===== LANDSCAPE MOBILE (phones in horizontal mode) ===== */
 @media screen and (orientation: landscape) and (max-height: 500px) {
   body {
     overflow: hidden;
@@ -411,7 +408,7 @@ h1 {
     gap: 0.2rem;
   }
 
-  /* ── Header: single compact row ── */
+  /* Header: title + controls all in ONE compact row */
   header {
     display: flex;
     flex-direction: row;
@@ -424,7 +421,7 @@ h1 {
   }
 
   h1 {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     letter-spacing: 1px;
     margin-bottom: 0;
     white-space: nowrap;
@@ -436,141 +433,119 @@ h1 {
     align-items: center;
     gap: 0.3rem;
     margin-bottom: 0;
+    flex-wrap: nowrap;
   }
 
   .controls select,
   .controls button {
-    padding: 0.15rem 0.4rem;
-    font-size: 0.6rem;
-    border-radius: 5px;
-    height: 22px;
-  }
-
-  .thinking-indicator { font-size: 0.55rem; margin-left: 2px; }
-
-  /* ── BOARD: rotated 90° — columns instead of rows ── */
-  .board-container {
-    flex-direction: row;        /* horizontal: [AI col] [kazans] [player col] */
-    align-items: stretch;
-    padding: 0.3rem 0.4rem;
-    border-radius: 10px;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    gap: 0.3rem;
-  }
-
-  /* Each pocket row → vertical column */
-  .otau-row {
-    flex-direction: column;
-    width: 40%;
-    height: 100%;
-    justify-content: space-between;
-    gap: 3px;
-    flex-shrink: 0;
-  }
-
-  .otau-wrapper {
-    flex: 1;
-    margin: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  /* Hide pocket number labels — not enough space */
-  .pocket-label { display: none; }
-
-  /* Pocket: full width, fills its flex row */
-  .otau.wood-carved {
-    flex: 1;
-    width: 100%;
-    height: auto;
-    min-height: 0;
-    padding: 3px 5px;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.62rem;
     border-radius: 6px;
+    height: 24px;
   }
 
-  /* Stones: horizontal wrap inside wide pockets */
-  .kumalak-grid {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-content: center;
-    gap: 2px;
+  .thinking-indicator {
+    font-size: 0.6rem;
+    margin-left: 2px;
   }
 
+  /* Board fills all remaining height */
+  .board-container {
+    padding: 0.3rem 0.45rem;
+    border-radius: 10px;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  /* Pocket wrappers — tighter horizontal spacing */
+  .otau-wrapper {
+    margin: 0 0.1rem;
+  }
+
+  /* Pocket number labels */
+  .pocket-label {
+    font-size: 0.52rem;
+    margin: 1px 0;
+    min-height: 12px;
+    line-height: 12px;
+  }
+
+  /* Pockets: short & wide to fit in landscape */
+  .otau.wood-carved {
+    height: 68px;
+    padding: 3px;
+    border-radius: 7px;
+  }
+
+  /* Stones: 12px — small but visible and tappable */
   .kumalak {
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     box-shadow:
       2px 3px 4px var(--stone-drop-shadow),
       inset -1px -2px 3px rgba(0,0,0,0.4),
       inset 1px 1px 2px rgba(255,255,255,0.9);
   }
 
-  /* ── Kazan section: centre column ── */
+  .kumalak-grid {
+    gap: 2px;
+  }
+
+  /* Kazan (score) section */
   .kazan-section {
-    flex-direction: row;        /* two kazans side by side */
-    flex: 1;
-    margin: 0;
-    gap: 0.25rem;
-    height: 100%;
-    align-items: stretch;
+    margin: 0.18rem 0;
+    gap: 0.2rem;
   }
 
   .kazan-wrapper {
-    flex: 1;
-    flex-direction: column;     /* score box on top, pit below */
-    height: 100%;
-    gap: 0.25rem;
-    align-items: stretch;
+    gap: 0.3rem;
+  }
+
+  .kazan {
+    height: 28px;
+    padding: 2px 5px;
+    border-radius: 6px;
   }
 
   .kazan-score-box {
-    width: 100%;
-    height: 30px;
-    flex-shrink: 0;
+    width: 32px;
+    height: 28px;
     border-radius: 6px;
+    flex-shrink: 0;
   }
 
-  .kazan-score-number { font-size: 0.8rem; }
+  .kazan-score-number {
+    font-size: 0.78rem;
+  }
 
-  /* Vertical kazan pit */
-  .kazan {
-    flex: 1;
-    height: auto;
-    min-height: 0;
-    padding: 4px 3px;
-    border-radius: 6px;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
+  .kazan-kumalak {
+    width: 12px;
+    height: 12px;
   }
 
   .kumalak-line {
-    flex-direction: row;
-    flex-wrap: wrap;
     gap: 2px;
-    justify-content: center;
-    align-content: flex-start;
-    height: 100%;
   }
 
-  .kazan-kumalak { width: 12px; height: 12px; }
-
-  /* Count badge */
+  /* Count badge (number on each pocket) */
   .count-badge {
     width: 15px;
     height: 15px;
-    font-size: 0.46rem;
+    font-size: 0.48rem;
     top: -5px;
     right: -5px;
   }
 
-  .plus-more { font-size: 0.5rem; padding: 1px 2px; }
-  .tuzdyk-icon { font-size: 1.4rem; }
+  .plus-more {
+    font-size: 0.52rem;
+    padding: 1px 3px;
+  }
+
+  .tuzdyk-icon {
+    font-size: 1.5rem;
+  }
 }
 
 @media (max-width: 900px) and (orientation: portrait) {
