@@ -103,19 +103,36 @@ def _nn_features(state: TogyzkumalakState):
 
 
 def _nn_eval(state: TogyzkumalakState) -> float:
-    """Returns value in [-1, 1] from current player's perspective (v2 — 3 hidden layers)."""
+    """Returns value in [-1, 1] from current player's perspective."""
     import numpy as np
     w = _nn
     x  = _nn_features(state)
-    # Support both old 2-layer (W3/b3 output) and new 3-layer (W4/b4 output)
     h1 = np.maximum(0.0, x  @ w['W1'] + w['b1'])
     h2 = np.maximum(0.0, h1 @ w['W2'] + w['b2'])
-    if 'W4' in w:
-        h3  = np.maximum(0.0, h2 @ w['W3'] + w['b3'])
+    h3 = np.maximum(0.0, h2 @ w['W3'] + w['b3'])
+    # Value head: Wv/bv (AlphaZero-lite) or W4/b4 (value-only v2) or W3/b3 (v1)
+    if 'Wv' in w:
+        out = float(np.tanh(h3 @ w['Wv'] + w['bv']))
+    elif 'W4' in w:
         out = float(np.tanh(h3 @ w['W4'] + w['b4']))
     else:
         out = float(np.tanh(h2 @ w['W3'] + w['b3']))
     return out
+
+
+def _nn_policy(state: TogyzkumalakState) -> 'np.ndarray | None':
+    """Returns policy probabilities (9,) over pockets 0-8, or None if no policy head."""
+    if _nn is None or 'Wp' not in _nn:
+        return None
+    import numpy as np
+    w = _nn
+    x  = _nn_features(state)
+    h1 = np.maximum(0.0, x  @ w['W1'] + w['b1'])
+    h2 = np.maximum(0.0, h1 @ w['W2'] + w['b2'])
+    h3 = np.maximum(0.0, h2 @ w['W3'] + w['b3'])
+    logits = h3 @ w['Wp'] + w['bp']
+    e = np.exp(logits - logits.max())
+    return e / (e.sum() + 1e-9)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CORE HELPER: simulate sowing without modifying state
@@ -289,7 +306,8 @@ def _is_loud_move(board, tuzdyks, cur_player, m):
     return is_cap, is_tuz
 
 
-def order_moves(state: TogyzkumalakState, moves: list) -> list:
+def order_moves(state: TogyzkumalakState, moves: list,
+                policy_probs: 'np.ndarray | None' = None) -> list:
     opp = 1 - state.currentPlayer
     cur = state.currentPlayer
     cs = cur * 9
@@ -319,6 +337,10 @@ def order_moves(state: TogyzkumalakState, moves: list) -> list:
             return -donated_to_opp * 50
 
         score = 0
+
+        # Policy network bonus (AlphaZero-lite): boosts moves NN thinks are good
+        if policy_probs is not None:
+            score += int(policy_probs[m % 9] * 80)
 
         # Picking up from a threatened pocket = defensive move (neutralizes threat)
         if m in threatened:
@@ -493,7 +515,9 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
     if len(moves) == 1:
         return moves[0]
 
-    moves = order_moves(root_state, moves)
+    # Use policy network for initial move ordering if available
+    root_policy = _nn_policy(root_state)
+    moves = order_moves(root_state, moves, policy_probs=root_policy)
     best_move   = moves[0]
     final_scores: dict = {}
     deadline    = time.time() + max_time_seconds * 0.95
