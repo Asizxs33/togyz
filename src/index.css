@@ -403,7 +403,7 @@ h1 {
   /* Center & limit width so board doesn't stretch across full screen */
   .app-container {
     height: 100vh;
-    max-width: 600px;          /* KEY: limit board width, center it */
+    max-width: 98vw;           /* KEY: use almost full screen width */
     width: 100%;
     padding: 0.3rem 0.5rem;
     justify-content: center;
