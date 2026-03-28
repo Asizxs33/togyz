@@ -403,9 +403,9 @@ h1 {
   /* Center & limit width so board doesn't stretch across full screen */
   .app-container {
     height: 100vh;
-    max-width: 98vw;           /* KEY: use almost full screen width */
-    width: 100%;
-    padding: 0.3rem 0.5rem;
+    max-width: 100vw;
+    width: 100vw;
+    padding: 0.2rem 0.2rem;
     justify-content: center;
     overflow: hidden;
     gap: 0.3rem;
@@ -449,14 +449,14 @@ h1 {
 
   /* Board */
   .board-container {
-    padding: 0.5rem 0.6rem;
-    border-radius: 12px;
+    padding: 0.4rem 0.3rem;
+    border-radius: 10px;
     width: 100%;
     flex: 1;
     min-height: 0;
   }
 
-  .otau-wrapper { margin: 0 0.2rem; }
+  .otau-wrapper { margin: 0 0.1rem; }
 
   .pocket-label {
     font-size: 0.6rem;
