@@ -119,18 +119,15 @@ def _evaluate_heuristic(state: TogyzkumalakState) -> float:
     cs = cur * 9
     os = opp * 9
 
-    # 1. Kazan difference — primary
-    ev = (state.kazans[cur] - state.kazans[opp]) * 3.0
+    # 1. Kazan difference — primary (increased weight)
+    ev = (state.kazans[cur] - state.kazans[opp]) * 4.0
 
     # 2. Tuzdyk advantage
-    # A tuzdyk typically collects 5-15 stones over its life → worth ~25-35 eval pts
     my_tuz = state.tuzdyks[cur] != -1
     opp_tuz = state.tuzdyks[opp] != -1
-    ev += (my_tuz - opp_tuz) * 30.0
+    ev += (my_tuz - opp_tuz) * 35.0
 
-    # 3. Tuzdyk DANGER: how many stones we'd donate to opponent's tuzdyk
-    # if we sowed from each of our current pockets (discourages keeping large
-    # piles that pass through opponent's tuzdyk)
+    # 3. Tuzdyk DANGER: stones we'd donate to opponent's tuzdyk
     opp_tuz_pos = state.tuzdyks[opp]
     if opp_tuz_pos != -1:
         for i in range(cs, cs + 9):
@@ -138,29 +135,63 @@ def _evaluate_heuristic(state: TogyzkumalakState) -> float:
                 _, d0, d1 = _simulate_sow(state.board, state.tuzdyks, i)
                 donated = d0 if opp == 0 else d1
                 if donated > 0:
-                    ev -= donated * 4.0   # each forced-donated stone = -4 pts
+                    ev -= donated * 5.0
 
-    # 4. Immediate capture opportunities (opponent's even pockets)
+    # 4. Capture opportunities (opponent's even pockets we can target)
     for i in range(os, os + 9):
         v = state.board[i]
         if v > 0 and v % 2 == 0:
-            ev += v * 0.6
-    # Penalty: our own even pockets are capture bait
+            ev += v * 0.9
+
+    # 5. Our even pockets = opponent capture bait
     for i in range(cs, cs + 9):
         v = state.board[i]
         if v > 0 and v % 2 == 0:
-            ev -= v * 0.6
+            ev -= v * 0.9
 
-    # 5. Tuzdyk creation readiness: opponent pocket with 2 stones = one step away
+    # 6. THREAT DETECTION: which of our pockets can opponent capture NEXT move?
+    # Makes AI proactively defend instead of waiting to be attacked.
+    for i in range(os, os + 9):
+        if state.board[i] == 0:
+            continue
+        land, _, _ = _simulate_sow(state.board, state.tuzdyks, i)
+        if land < 0:
+            continue
+        if cs <= land < cs + 9:
+            fut = state.board[land] + 1
+            if fut % 2 == 0:
+                ev -= fut * 1.8  # strongly penalize being under immediate threat
+
+    # 7. SETUP DETECTION: our moves that create future capture opportunities
+    # (2-move planning: we set it up now, capture next turn)
+    best_setup = 0.0
+    for i in range(cs, cs + 9):
+        if state.board[i] == 0:
+            continue
+        land, d0, d1 = _simulate_sow(state.board, state.tuzdyks, i)
+        donated_to_opp = d0 if opp == 0 else d1
+        if donated_to_opp > 0:
+            continue
+        if land < 0:
+            continue
+        if os <= land < os + 9:
+            fut = state.board[land] + 1
+            if fut % 2 == 0 and fut >= 4:
+                best_setup = max(best_setup, fut * 0.5)
+    ev += best_setup
+
+    # 8. Tuzdyk creation readiness: opponent pocket with 2 stones = one step away
     if not my_tuz:
         opp_tuz_idx = state.tuzdyks[opp]
         for i in range(os, os + 9):
             if state.board[i] == 2 and i not in (8, 17):
                 if opp_tuz_idx == -1 or opp_tuz_idx % 9 != i % 9:
-                    ev += 10.0  # increased from 6 → 10
+                    ev += 12.0
 
-    # 6. Stone mobility (tie-breaker)
-    ev += (sum(state.board[cs:cs+9]) - sum(state.board[os:os+9])) * 0.1
+    # 9. Mobility: more active pockets = more strategic options
+    my_active = sum(1 for i in range(cs, cs + 9) if state.board[i] > 0)
+    opp_active = sum(1 for i in range(os, os + 9) if state.board[i] > 0)
+    ev += (my_active - opp_active) * 1.5
 
     return ev
 
@@ -189,6 +220,19 @@ def _is_loud_move(board, tuzdyks, cur_player, m):
 def order_moves(state: TogyzkumalakState, moves: list) -> list:
     opp = 1 - state.currentPlayer
     cur = state.currentPlayer
+    cs = cur * 9
+    os = opp * 9
+
+    # Pre-compute: which of OUR pockets are immediately threatened by opponent?
+    threatened = set()
+    for i in range(os, os + 9):
+        if state.board[i] == 0:
+            continue
+        land, _, _ = _simulate_sow(state.board, state.tuzdyks, i)
+        if land >= 0 and cs <= land < cs + 9:
+            fut = state.board[land] + 1
+            if fut % 2 == 0:
+                threatened.add(land)
 
     def priority(m: int) -> int:
         stones = state.board[m]
@@ -200,24 +244,33 @@ def order_moves(state: TogyzkumalakState, moves: list) -> list:
         # CRITICAL: heavily penalize donating stones to opponent's tuzdyk
         donated_to_opp = d0 if opp == 0 else d1
         if donated_to_opp > 0:
-            return -donated_to_opp * 50   # push these to the very end
+            return -donated_to_opp * 50
+
+        score = 0
+
+        # Picking up from a threatened pocket = defensive move (neutralizes threat)
+        if m in threatened:
+            score += 70
 
         if land < 0 or land in state.tuzdyks:
-            return 0
+            return score
 
-        os = opp * 9
         if os <= land < os + 9:
             fut = state.board[land] + 1
             if fut % 2 == 0:
-                return fut * 10            # capture: more stones = higher priority
+                return score + fut * 10    # capture
             if (fut == 3
                     and state.tuzdyks[cur] == -1
                     and land not in (8, 17)
                     and (state.tuzdyks[opp] == -1
                          or state.tuzdyks[opp] % 9 != land % 9)):
-                return 100                 # tuzdyk creation = highest non-capture priority
+                return score + 100         # tuzdyk creation
 
-        return 0
+            # Setup: landing makes opponent pocket even (future capture)
+            if fut % 2 == 0 and fut >= 4:
+                score += fut * 3
+
+        return score
 
     return sorted(moves, key=priority, reverse=True)
 
@@ -322,6 +375,7 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
 
     moves = order_moves(root_state, moves)
     best_move = moves[0]
+    final_scores = {}   # move → score from last completed depth
     deadline = time.time() + max_time_seconds * 0.95
 
     for depth in range(1, 30):
@@ -329,11 +383,13 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
             best_score = float('-inf')
             alpha = float('-inf')
             current_best = moves[0]
+            depth_scores = {}
 
             for move in moves:
                 child = root_state.clone()
                 child.makeMove(move)
                 score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline)
+                depth_scores[move] = score
                 if score > best_score:
                     best_score = score
                     current_best = move
@@ -341,6 +397,7 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
                     alpha = score
 
             best_move = current_best
+            final_scores = depth_scores
             moves = [best_move] + [m for m in moves if m != best_move]
 
             if abs(best_score) > 9000:
@@ -348,6 +405,16 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
 
         except _Timeout:
             break
+
+    # Among moves within 3 pts of best, pick randomly to avoid repetition.
+    # This makes the AI less predictable under equal pressure.
+    if final_scores:
+        best_score = final_scores.get(best_move, float('-inf'))
+        epsilon = 3.0
+        candidates = [m for m, s in final_scores.items()
+                      if s >= best_score - epsilon]
+        if len(candidates) > 1:
+            best_move = random.choice(candidates)
 
     return best_move
 
