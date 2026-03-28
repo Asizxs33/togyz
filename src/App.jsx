@@ -159,11 +159,11 @@ function App() {
                         <option value="2">Оңай</option>
                         <option value="3">Орташа</option>
                         <option value="5">Қиын</option>
-                        <option value="mcts">⚡ Өте Қиын (AI)</option>
+                        <option value="mcts">⚡ Өте Қиын</option>
                     </select>
-                    <button onClick={handleRestart}>Жаңа ойын</button>
-                    {isAiThinking && <span className="thinking-indicator">🤖 Компьютер ойлануда...</span>}
-                    {isAnimating && <span className="thinking-indicator">⏳</span>}
+                    <button onClick={handleRestart}>↺ Жаңа</button>
+                    {isAiThinking && <span className="thinking-indicator">🤖...</span>}
+                    {isAnimating && !isAiThinking && <span className="thinking-indicator">⏳</span>}
                 </div>
             </header>
 
