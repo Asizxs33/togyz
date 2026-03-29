@@ -15,7 +15,8 @@ def best_move():
         state = TogyzkumalakState()
         state.board        = data.get('board',         [9]*18)
         state.kazans       = data.get('kazans',        [0, 0])
-        state.tuzdyks      = data.get('tuzdyks',       [-1, -1])
+        raw_tuz            = data.get('tuzdyks',       [-1, -1])
+        state.tuzdyks      = [t if t is not None else -1 for t in raw_tuz]
         state.currentPlayer = data.get('currentPlayer', 1)
         state.isGameOver   = data.get('isGameOver',    False)
         state.winner       = data.get('winner',        None)
