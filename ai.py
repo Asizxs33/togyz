@@ -112,11 +112,11 @@ def _nn_eval(state: TogyzkumalakState) -> float:
     h3 = np.maximum(0.0, h2 @ w['W3'] + w['b3'])
     # Value head: Wv/bv (AlphaZero-lite) or W4/b4 (value-only v2) or W3/b3 (v1)
     if 'Wv' in w:
-        out = float(np.tanh(h3 @ w['Wv'] + w['bv']))
+        out = np.tanh(h3 @ w['Wv'] + w['bv']).item()
     elif 'W4' in w:
-        out = float(np.tanh(h3 @ w['W4'] + w['b4']))
+        out = np.tanh(h3 @ w['W4'] + w['b4']).item()
     else:
-        out = float(np.tanh(h2 @ w['W3'] + w['b3']))
+        out = np.tanh(h2 @ w['W3'] + w['b3']).item()
     return out
 
 
