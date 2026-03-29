@@ -30,7 +30,7 @@ def best_move():
     except Exception as e:
         import traceback
         print(traceback.format_exc(), flush=True)
-        return jsonify({"move": -1, "error": str(e)}), 200
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
