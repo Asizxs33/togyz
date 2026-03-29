@@ -181,14 +181,6 @@ def _simulate_sow(board, tuzdyks, m):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate(state: TogyzkumalakState) -> float:
-    # If neural network is loaded, blend NN + heuristic
-    # (blend keeps tactical sharpness from heuristic while NN improves strategic play)
-    if _nn is not None:
-        nn_val  = _nn_eval(state)           # [-1, 1]
-        hval    = _evaluate_heuristic(state)
-        # Scale NN to same range as heuristic, then blend 60/40
-        return 0.6 * nn_val * 120.0 + 0.4 * hval
-
     return _evaluate_heuristic(state)
 
 
