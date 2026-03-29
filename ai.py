@@ -560,6 +560,7 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
             prev_score   = best_score
             best_move    = current_best
             final_scores = depth_scores
+            print(f"[AI] depth={depth} move={best_move} score={best_score:.1f}", flush=True)
             # Move best move to front for next iteration (move ordering)
             moves = [best_move] + [m for m in moves if m != best_move]
 
@@ -567,6 +568,7 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
                 break
 
         except _Timeout:
+            print(f"[AI] timeout at depth={depth}", flush=True)
             break
 
     # Diversity: among moves within 3 pts of best, pick randomly
