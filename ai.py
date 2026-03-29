@@ -4,6 +4,13 @@ import time
 import os
 from game_logic import TogyzkumalakState
 
+# Load .env for OPENAI_API_KEY
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ─────────────────────────────────────────────────────────────────────────────
 # NEURAL NETWORK — loaded once at startup if model_weights.npz exists
 # ─────────────────────────────────────────────────────────────────────────────
@@ -494,6 +501,80 @@ def _negamax(state: TogyzkumalakState, depth: int,
     return best
 
 
+def _gpt_pick_move(state: TogyzkumalakState, top_moves: list, scores: dict) -> int:
+    """Ask GPT-4o-mini to pick best move from top candidates. Returns move index or -1 on failure."""
+    api_key = os.environ.get('OPENAI_API_KEY', '')
+    if not api_key:
+        return -1
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+
+        cur = state.currentPlayer
+        opp = 1 - cur
+        cs, os_ = cur * 9, opp * 9
+
+        my_pockets  = [state.board[cs + i]  for i in range(9)]
+        opp_pockets = [state.board[os_ + i] for i in range(9)]
+
+        move_lines = []
+        for idx, m in enumerate(top_moves):
+            land, d0, d1 = _simulate_sow(state.board, state.tuzdyks, m)
+            donated = d0 if opp == 0 else d1
+            desc = f"Move {idx+1}: pick pocket {m % 9} ({state.board[m]} stones)"
+            if donated > 0:
+                desc += f" — gives {donated} stone(s) to opponent tuzdyk (dangerous!)"
+            elif land >= 0:
+                fut = state.board[land] + 1
+                side = "opponent" if os_ <= land < os_ + 9 else "my"
+                if os_ <= land < os_ + 9 and fut % 2 == 0:
+                    desc += f" — captures {fut} stones from opponent pocket {land % 9}"
+                elif os_ <= land < os_ + 9 and fut == 3 and state.tuzdyks[cur] == -1 and land not in (8, 17):
+                    desc += f" — creates tuzdyk at opponent pocket {land % 9} (permanent tribute!)"
+                else:
+                    desc += f" — lands on {side} pocket {land % 9} (becomes {fut} stones)"
+            desc += f"  [engine score: {scores.get(m, 0):.1f}]"
+            move_lines.append(desc)
+
+        tuz_my  = f"pocket {state.tuzdyks[cur] % 9}" if state.tuzdyks[cur]  != -1 else "none"
+        tuz_opp = f"pocket {state.tuzdyks[opp] % 9}" if state.tuzdyks[opp] != -1 else "none"
+
+        prompt = (
+            "You are an expert Togyzkumalak player (Central Asian mancala).\n\n"
+            "RULES:\n"
+            "- Sow stones counter-clockwise across 18 pockets (9 per side)\n"
+            "- If last stone lands on OPPONENT side and total becomes EVEN → capture all\n"
+            "- If last stone lands on OPPONENT side and total becomes exactly 3 (not last pocket) → create tuzdyk (permanent tribute pocket)\n"
+            "- Tuzdyk: every stone that passes through it goes to owner's kazan forever\n"
+            "- Never give stones to opponent's tuzdyk\n"
+            "- Goal: collect more than 81 stones\n\n"
+            f"BOARD STATE (my turn as Player {cur}):\n"
+            f"  My pockets    [0-8]: {my_pockets}\n"
+            f"  Opp pockets   [0-8]: {opp_pockets}\n"
+            f"  My kazan: {state.kazans[cur]}   Opponent kazan: {state.kazans[opp]}\n"
+            f"  My tuzdyk: {tuz_my}   Opponent tuzdyk: {tuz_opp}\n\n"
+            "TOP CANDIDATE MOVES:\n"
+            + "\n".join(move_lines) + "\n\n"
+            "Choose the strategically best move. Reply with ONLY the move number (1, 2 or 3)."
+        )
+
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=5,
+            temperature=0.0,
+            timeout=4.0,
+        )
+        choice = resp.choices[0].message.content.strip()
+        pick = int(choice) - 1
+        if 0 <= pick < len(top_moves):
+            print(f"[GPT] chose move {top_moves[pick] % 9} (option {pick+1})", flush=True)
+            return top_moves[pick]
+    except Exception as e:
+        print(f"[GPT] fallback: {e}", flush=True)
+    return -1
+
+
 def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
                              max_time_seconds: float = 3.0) -> int:
     global _TT, _killers
@@ -571,12 +652,22 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
             print(f"[AI] timeout at depth={depth}", flush=True)
             break
 
-    # Diversity: among moves within 3 pts of best, pick randomly
+    # Build top-3 candidates for GPT
     if final_scores:
         bs = final_scores.get(best_move, float('-inf'))
-        candidates = [m for m, s in final_scores.items() if s >= bs - 3.0]
-        if len(candidates) > 1:
-            best_move = random.choice(candidates)
+        top3 = sorted(
+            [m for m, s in final_scores.items() if s >= bs - 10.0],
+            key=lambda m: final_scores[m], reverse=True
+        )[:3]
+
+        # Ask GPT to pick among top candidates
+        if len(top3) > 1:
+            gpt_move = _gpt_pick_move(root_state, top3, final_scores)
+            if gpt_move != -1:
+                return gpt_move
+
+        # Fallback: return best alpha-beta move
+        best_move = top3[0]
 
     return best_move
 
