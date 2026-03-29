@@ -9,28 +9,28 @@ CORS(app)
 
 @app.route('/api/best-move', methods=['POST'])
 def best_move():
-    data = request.json
-    
-    # Reconstruct state from JSON payload
-    state = TogyzkumalakState()
-    state.board = data.get('board', [9]*18)
-    state.kazans = data.get('kazans', [0, 0])
-    state.tuzdyks = data.get('tuzdyks', [-1, -1])
-    state.currentPlayer = data.get('currentPlayer', 1)
-    state.isGameOver = data.get('isGameOver', False)
-    state.winner = data.get('winner', None)
+    try:
+        data = request.json
 
-    algorithm = data.get('algorithm', 'mcts')
-    
-    if state.isGameOver:
-        return jsonify({"move": -1, "error": "Game is over"})
+        state = TogyzkumalakState()
+        state.board        = data.get('board',         [9]*18)
+        state.kazans       = data.get('kazans',        [0, 0])
+        state.tuzdyks      = data.get('tuzdyks',       [-1, -1])
+        state.currentPlayer = data.get('currentPlayer', 1)
+        state.isGameOver   = data.get('isGameOver',    False)
+        state.winner       = data.get('winner',        None)
 
-    # Determine move
-    best_move_index = -1
-    max_time = data.get('max_time_seconds', 3.0)
-    best_move_index = get_best_move_alphabeta(state, state.currentPlayer, max_time)
+        if state.isGameOver:
+            return jsonify({"move": -1})
 
-    return jsonify({"move": best_move_index})
+        max_time = float(data.get('max_time_seconds', 3.0))
+        move = get_best_move_alphabeta(state, state.currentPlayer, max_time)
+        return jsonify({"move": move})
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        return jsonify({"move": -1, "error": str(e)}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
