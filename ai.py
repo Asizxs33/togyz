@@ -517,45 +517,48 @@ def _gpt_pick_move(state: TogyzkumalakState, top_moves: list, scores: dict) -> i
         my_pockets  = [state.board[cs + i]  for i in range(9)]
         opp_pockets = [state.board[os_ + i] for i in range(9)]
 
+        # Rank moves by engine score (best first) so GPT sees them in order
+        top_moves = sorted(top_moves, key=lambda m: scores.get(m, 0), reverse=True)
+
         move_lines = []
         for idx, m in enumerate(top_moves):
             land, d0, d1 = _simulate_sow(state.board, state.tuzdyks, m)
             donated = d0 if opp == 0 else d1
-            desc = f"Move {idx+1}: pick pocket {m % 9} ({state.board[m]} stones)"
+            rank = ["BEST", "2ND", "3RD"][idx] if idx < 3 else f"{idx+1}TH"
+            desc = f"Move {idx+1} ({rank} by engine): pocket {m % 9} ({state.board[m]} stones)"
             if donated > 0:
-                desc += f" — gives {donated} stone(s) to opponent tuzdyk (dangerous!)"
+                desc += f" — WARNING: gives {donated} stone(s) to opponent tuzdyk!"
             elif land >= 0:
                 fut = state.board[land] + 1
-                side = "opponent" if os_ <= land < os_ + 9 else "my"
                 if os_ <= land < os_ + 9 and fut % 2 == 0:
-                    desc += f" — captures {fut} stones from opponent pocket {land % 9}"
+                    desc += f" — CAPTURES {fut} stones from opponent pocket {land % 9}"
                 elif os_ <= land < os_ + 9 and fut == 3 and state.tuzdyks[cur] == -1 and land not in (8, 17):
-                    desc += f" — creates tuzdyk at opponent pocket {land % 9} (permanent tribute!)"
+                    desc += f" — CREATES TUZDYK at opponent pocket {land % 9}"
                 else:
-                    desc += f" — lands on {side} pocket {land % 9} (becomes {fut} stones)"
-            desc += f"  [engine score: {scores.get(m, 0):.1f}]"
+                    side = "opponent" if os_ <= land < os_ + 9 else "own"
+                    desc += f" — lands on {side} pocket {land % 9} (now {fut} stones)"
             move_lines.append(desc)
 
         tuz_my  = f"pocket {state.tuzdyks[cur] % 9}" if state.tuzdyks[cur]  != -1 else "none"
         tuz_opp = f"pocket {state.tuzdyks[opp] % 9}" if state.tuzdyks[opp] != -1 else "none"
 
         prompt = (
-            "You are an expert Togyzkumalak player (Central Asian mancala).\n\n"
+            "You are an expert Togyzkumalak player (Central Asian mancala game).\n\n"
             "RULES:\n"
-            "- Sow stones counter-clockwise across 18 pockets (9 per side)\n"
-            "- If last stone lands on OPPONENT side and total becomes EVEN → capture all\n"
-            "- If last stone lands on OPPONENT side and total becomes exactly 3 (not last pocket) → create tuzdyk (permanent tribute pocket)\n"
-            "- Tuzdyk: every stone that passes through it goes to owner's kazan forever\n"
-            "- Never give stones to opponent's tuzdyk\n"
-            "- Goal: collect more than 81 stones\n\n"
-            f"BOARD STATE (my turn as Player {cur}):\n"
-            f"  My pockets    [0-8]: {my_pockets}\n"
-            f"  Opp pockets   [0-8]: {opp_pockets}\n"
-            f"  My kazan: {state.kazans[cur]}   Opponent kazan: {state.kazans[opp]}\n"
-            f"  My tuzdyk: {tuz_my}   Opponent tuzdyk: {tuz_opp}\n\n"
-            "TOP CANDIDATE MOVES:\n"
+            "- Sow stones counter-clockwise; last stone on OPPONENT side with EVEN total = capture all\n"
+            "- Last stone making exactly 3 on opponent side (not last pocket) = tuzdyk (permanent tribute)\n"
+            "- Tuzdyk drains every passing stone to owner's kazan permanently\n"
+            "- NEVER donate stones to opponent's tuzdyk\n"
+            "- First to exceed 81 stones wins\n\n"
+            f"POSITION (you are Player {cur}):\n"
+            f"  Your pockets [0-8]: {my_pockets}  (kazan: {state.kazans[cur]})\n"
+            f"  Opp pockets  [0-8]: {opp_pockets}  (kazan: {state.kazans[opp]})\n"
+            f"  Your tuzdyk: {tuz_my} | Opponent tuzdyk: {tuz_opp}\n\n"
+            "CANDIDATE MOVES (ranked by search engine — Move 1 is engine's top pick):\n"
             + "\n".join(move_lines) + "\n\n"
-            "Choose the strategically best move. Reply with ONLY the move number (1, 2 or 3)."
+            "The engine ranking is tactically accurate. Override it only if you see a clear strategic reason "
+            "(tuzdyk creation, preventing opponent tuzdyk, large capture). "
+            "Otherwise prefer Move 1. Reply with ONLY the move number."
         )
 
         resp = client.chat.completions.create(
