@@ -34,14 +34,14 @@ def _load_nn():
         weights = {k: data[k] for k in data.files}
         # Check architecture compatibility: W1 must accept 34-dim input
         if weights['W1'].shape[0] != 34:
-            print(f"[AI] Weights are v1 (25-dim), skipping NN — retrain with train_ai.py", flush=True)
+            print("[AI] Weights are v1 (25-dim), skipping NN - retrain with train_ai.py", flush=True)
             return
         _nn = weights
-        arch = f"{weights['W1'].shape[0]}→{weights['W1'].shape[1]}→{weights['W2'].shape[1]}"
+        arch = f"{weights['W1'].shape[0]}->{weights['W1'].shape[1]}->{weights['W2'].shape[1]}"
         if 'W4' in weights:
-            arch += f"→{weights['W3'].shape[1]}→1"
+            arch += f"->{weights['W3'].shape[1]}->1"
         else:
-            arch += "→1"
+            arch += "->1"
         print(f"[AI] Neural network loaded: {arch}", flush=True)
     except Exception as e:
         print(f"[AI] Could not load neural network: {e}", flush=True)
