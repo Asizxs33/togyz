@@ -30,8 +30,9 @@ def best_move():
     if algorithm == 'mcts':
         # In Python, we can comfortably do 10,000+ iterations because it's much faster
         # 30,000 gives a very strong bot.
-        iterations = data.get('iterations', 20000) 
-        best_move_index = get_best_move_mcts(state, state.currentPlayer, iterations)
+        iterations = data.get('iterations', 20000)
+        max_time_seconds = data.get('max_time_seconds', 3.0)
+        best_move_index = get_best_move_mcts(state, state.currentPlayer, iterations, max_time_seconds=max_time_seconds)
     else:
         # Fallback to pure random if algorithm is weird
         moves = state.getPossibleMoves(state.currentPlayer)
