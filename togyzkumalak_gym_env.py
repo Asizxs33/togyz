@@ -5,6 +5,8 @@ reset() -> observation, step(action) -> observation/reward/done/info.
 It intentionally has no gym dependency so Render can deploy it safely.
 """
 
+import random
+
 from game_logic import TogyzkumalakState
 
 
@@ -22,6 +24,16 @@ class TogyzkumalakGymEnv:
     def legal_actions(self):
         start = self.state.currentPlayer * 9
         return [move - start for move in self.state.getPossibleMoves(self.state.currentPlayer)]
+
+    def available_action(self):
+        legal = set(self.legal_actions())
+        return [1 if action in legal else 0 for action in range(self.action_size)]
+
+    def check_action(self, action):
+        return isinstance(action, int) and action in self.legal_actions()
+
+    def sample_action(self):
+        return random.choice(self.legal_actions())
 
     def step(self, action):
         if not isinstance(action, int):
@@ -93,6 +105,17 @@ class TogyzkumalakGymEnv:
 
         return obs
 
+    def render(self):
+        top = list(reversed(self.state.board[9:18]))
+        bottom = self.state.board[:9]
+        return "\n".join((
+            f"P1 kazan: {self.state.kazans[1]}   tuzdyk: {self.state.tuzdyks[1]}",
+            " ".join(f"{v:2d}" for v in top),
+            " ".join(f"{v:2d}" for v in bottom),
+            f"P0 kazan: {self.state.kazans[0]}   tuzdyk: {self.state.tuzdyks[0]}",
+            f"current: P{self.state.currentPlayer}",
+        ))
+
 
 def _encode_hole(stones):
     return [
@@ -101,7 +124,7 @@ def _encode_hole(stones):
         float(stones % 2),
         (stones % 9) / 8.0,
         (stones % 18) / 17.0,
-        min(stones, 18) / 9.0,
+        stones / 9.0,
         0.0,
     ]
 
@@ -112,6 +135,5 @@ def _encode_ninth_hole(stones):
         float(stones % 2),
         (stones % 9) / 8.0,
         (stones % 18) / 17.0,
-        min(stones, 18) / 9.0,
+        stones / 9.0,
     ]
-
