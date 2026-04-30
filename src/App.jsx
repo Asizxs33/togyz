@@ -6,6 +6,16 @@ import { Kazan } from './components/Kazan';
 
 const ANIM_DELAY = 180;
 const AI_MODE_LABEL = 'MCTS AI';
+const AI_API_BASE = 'https://togyz.onrender.com';
+
+function snapshotState(state) {
+    return {
+        board: [...state.board],
+        kazans: [...state.kazans],
+        tuzdyks: [...state.tuzdyks],
+        player: state.currentPlayer,
+    };
+}
 
 function App() {
     const [gameState, setGameState] = useState(new TogyzkumalakState());
@@ -18,6 +28,8 @@ function App() {
     const [highlightIndex, setHighlightIndex] = useState(-1);
     const [animPhase, setAnimPhase] = useState(null);
     const animTimerRef = useRef(null);
+    const aiMoveHistoryRef = useRef([]);
+    const learningSentRef = useRef(false);
 
     const displayBoard = animBoard || gameState.board;
     const displayKazans = animKazans || gameState.kazans;
@@ -57,6 +69,11 @@ function App() {
 
             const handleBestMove = (bestMove) => {
                 if (bestMove !== -1) {
+                    aiMoveHistoryRef.current.push({
+                        ...snapshotState(gameState),
+                        move: bestMove,
+                    });
+
                     const frames = gameState.getMoveSteps(bestMove);
                     const finalState = gameState.clone();
                     finalState.makeMove(bestMove);
@@ -80,7 +97,7 @@ function App() {
                 max_time_seconds: 3.0,
             };
 
-            fetch('https://togyz.onrender.com/api/best-move', {
+            fetch(`${AI_API_BASE}/api/best-move`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -97,6 +114,27 @@ function App() {
                 });
         }
     }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, gameState, playAnimation]);
+
+    useEffect(() => {
+        if (!gameState.isGameOver || learningSentRef.current) return;
+
+        learningSentRef.current = true;
+        const samples = aiMoveHistoryRef.current;
+        if (samples.length === 0) return;
+
+        fetch(`${AI_API_BASE}/api/learn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                samples,
+                winner: gameState.winner,
+                aiPlayer: 1,
+                finalKazans: gameState.kazans,
+            }),
+        }).catch((err) => {
+            console.error('Failed to submit AI learning data:', err);
+        });
+    }, [gameState.isGameOver, gameState.winner, gameState.kazans]);
 
     const handlePocketClick = useCallback((index) => {
         if (gameState.currentPlayer === 0 && !gameState.isGameOver && !isAiThinking && !isAnimating) {
@@ -118,6 +156,8 @@ function App() {
         setAnimPhase(null);
         setIsAnimating(false);
         setIsAiThinking(false);
+        aiMoveHistoryRef.current = [];
+        learningSentRef.current = false;
         setGameState(new TogyzkumalakState());
     };
 
