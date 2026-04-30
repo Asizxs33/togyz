@@ -1,31 +1,35 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TogyzkumalakState } from './logic/Togyzkumalak';
 import { calculateBestMove } from './logic/AI';
 import { Otau } from './components/Otau';
 import { Kazan } from './components/Kazan';
 
-const ANIM_DELAY = 180; // ms between each stone placement frame
+const ANIM_DELAY = 180;
+
+const difficultyLabels = {
+    2: 'Легкий',
+    3: 'Средний',
+    5: 'Сложный',
+    mcts: 'MCTS AI',
+};
 
 function App() {
     const [gameState, setGameState] = useState(new TogyzkumalakState());
     const [difficulty, setDifficulty] = useState(3);
     const [isAiThinking, setIsAiThinking] = useState(false);
-    
-    // Animation state
+
     const [isAnimating, setIsAnimating] = useState(false);
-    const [animBoard, setAnimBoard] = useState(null);        // Overrides gameState.board during animation
-    const [animKazans, setAnimKazans] = useState(null);      // Overrides gameState.kazans during animation
-    const [animTuzdyks, setAnimTuzdyks] = useState(null);    // Overrides gameState.tuzdyks during animation
-    const [highlightIndex, setHighlightIndex] = useState(-1); // Which pocket is currently highlighted
-    const [animPhase, setAnimPhase] = useState(null);         // 'pickup' | 'sow' | 'capture' | 'tuzdyk'
+    const [animBoard, setAnimBoard] = useState(null);
+    const [animKazans, setAnimKazans] = useState(null);
+    const [animTuzdyks, setAnimTuzdyks] = useState(null);
+    const [highlightIndex, setHighlightIndex] = useState(-1);
+    const [animPhase, setAnimPhase] = useState(null);
     const animTimerRef = useRef(null);
 
-    // Derived display state (animation overrides game state visually)
     const displayBoard = animBoard || gameState.board;
     const displayKazans = animKazans || gameState.kazans;
     const displayTuzdyks = animTuzdyks || gameState.tuzdyks;
 
-    // Play animation frames sequentially
     const playAnimation = useCallback((frames, finalState) => {
         setIsAnimating(true);
         let frameIndex = 0;
@@ -41,7 +45,6 @@ function App() {
                 frameIndex++;
                 animTimerRef.current = setTimeout(playNextFrame, ANIM_DELAY);
             } else {
-                // Animation done — apply the real final game state
                 setAnimBoard(null);
                 setAnimKazans(null);
                 setAnimTuzdyks(null);
@@ -55,17 +58,16 @@ function App() {
         playNextFrame();
     }, []);
 
-    // AI turn
     useEffect(() => {
         if (gameState.currentPlayer === 1 && !gameState.isGameOver && !isAiThinking && !isAnimating) {
             setIsAiThinking(true);
-            
+
             const handleBestMove = (bestMove) => {
                 if (bestMove !== -1) {
                     const frames = gameState.getMoveSteps(bestMove);
                     const finalState = gameState.clone();
                     finalState.makeMove(bestMove);
-                    
+
                     setIsAiThinking(false);
                     playAnimation(frames, finalState);
                 } else {
@@ -74,7 +76,6 @@ function App() {
             };
 
             if (difficulty === 'mcts') {
-                // Fetch from Python Backend MCTS
                 const payload = {
                     board: gameState.board,
                     kazans: gameState.kazans,
@@ -84,27 +85,25 @@ function App() {
                     winner: gameState.winner,
                     algorithm: 'mcts',
                     iterations: 20000,
-                    max_time_seconds: 3.0
+                    max_time_seconds: 3.0,
                 };
-                
+
                 fetch('https://togyz.onrender.com/api/best-move', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
                 })
-                .then(res => res.json())
-                .then(data => {
-                    handleBestMove(data.move);
-                })
-                .catch(err => {
-                    console.error("Failed to reach Python backend:", err);
-                    alert("Серверге (Python Backend) қосылу мүмкін емес! Стандартты Minimax (Қиын) режимі орындалады.");
-                    // Fallback to local minimax
-                    const fallbackMove = calculateBestMove(gameState, 5, 1, 'minimax');
-                    setTimeout(() => handleBestMove(fallbackMove), 400);
-                });
+                    .then((res) => res.json())
+                    .then((data) => {
+                        handleBestMove(data.move);
+                    })
+                    .catch((err) => {
+                        console.error('Failed to reach Python backend:', err);
+                        alert('Не удалось подключиться к AI-серверу. Включен локальный сложный режим.');
+                        const fallbackMove = calculateBestMove(gameState, 5, 1, 'minimax');
+                        setTimeout(() => handleBestMove(fallbackMove), 400);
+                    });
             } else {
-                // Local Standard Minimax
                 setTimeout(() => {
                     const depth = parseInt(difficulty);
                     const bestMove = calculateBestMove(gameState, depth, 1, 'minimax');
@@ -114,24 +113,18 @@ function App() {
         }
     }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, difficulty, gameState, playAnimation]);
 
-    // Player move
     const handlePocketClick = useCallback((index) => {
         if (gameState.currentPlayer === 0 && !gameState.isGameOver && !isAiThinking && !isAnimating) {
             if (gameState.isValidMove(0, index)) {
-                // Get animation frames
                 const frames = gameState.getMoveSteps(index);
-                
-                // Get the real final state
                 const finalState = gameState.clone();
                 finalState.makeMove(index);
-                
                 playAnimation(frames, finalState);
             }
         }
     }, [gameState, isAiThinking, isAnimating, playAnimation]);
 
     const handleRestart = () => {
-        // Clear any running animation
         if (animTimerRef.current) clearTimeout(animTimerRef.current);
         setAnimBoard(null);
         setAnimKazans(null);
@@ -146,86 +139,114 @@ function App() {
     const topRowIndices = [17, 16, 15, 14, 13, 12, 11, 10, 9];
     const bottomRowIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
-    const isWinner = gameState.winner === 0 ? "Сен жеңдің! 🎉" : (gameState.winner === 1 ? "Компьютер жеңді 🤖" : "Тең ойын 🤝");
-
     const isBusy = isAnimating || isAiThinking;
+    const winnerText = gameState.winner === 0
+        ? 'Вы выиграли'
+        : gameState.winner === 1
+            ? 'Компьютер выиграл'
+            : 'Ничья';
+
+    const statusText = useMemo(() => {
+        if (gameState.isGameOver) return 'Партия завершена';
+        if (isAiThinking) return 'Компьютер думает';
+        if (isAnimating) return 'Ход выполняется';
+        return gameState.currentPlayer === 0 ? 'Ваш ход' : 'Ход компьютера';
+    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating]);
 
     return (
-        <div className="app-container">
-            <header>
-                <h1>Тоғызқұмалақ</h1>
-                <div className="controls">
-                    <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={isBusy}>
-                        <option value="2">Оңай</option>
-                        <option value="3">Орташа</option>
-                        <option value="5">Қиын</option>
-                        <option value="mcts">⚡ Өте Қиын</option>
-                    </select>
-                    <button onClick={handleRestart}>↺ Жаңа</button>
-                    {isAiThinking && <span className="thinking-indicator">🤖...</span>}
-                    {isAnimating && !isAiThinking && <span className="thinking-indicator">⏳</span>}
-                </div>
-            </header>
-
-            <div className="board-container classic-wood">
-                {/* TOP ROW (AI) */}
-                <div className="otau-row">
-                    {topRowIndices.map(index => (
-                        <Otau 
-                            key={index} 
-                            index={index}
-                            count={displayBoard[index]}
-                            isEnabled={false}
-                            isTuzdyk={displayTuzdyks.includes(index)}
-                            owner={displayTuzdyks.indexOf(index)}
-                            onClick={() => {}}
-                            label={index - 8}
-                            isHighlighted={highlightIndex === index}
-                            animPhase={highlightIndex === index ? animPhase : null}
-                        />
-                    ))}
+        <main className="app-shell">
+            <section className="hero-bar">
+                <div className="brand-block">
+                    <span className="eyebrow">Классическая казахская игра</span>
+                    <h1>Тоғызқұмалақ</h1>
+                    <p>Играйте против компьютера, следите за қазанами и создавайте тұздық в нужный момент.</p>
                 </div>
 
-                {/* MIDDLE SECTION (KAZANS) */}
-                <div className="kazan-section">
-                    <Kazan player={1} count={displayKazans[1]} isActive={gameState.currentPlayer === 1 && !isBusy} />
-                    <Kazan player={0} count={displayKazans[0]} isActive={gameState.currentPlayer === 0 && !isBusy} />
+                <div className="control-panel" aria-label="Настройки игры">
+                    <label className="select-field">
+                        <span>Сложность</span>
+                        <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={isBusy}>
+                            <option value="2">Легкий</option>
+                            <option value="3">Средний</option>
+                            <option value="5">Сложный</option>
+                            <option value="mcts">MCTS AI</option>
+                        </select>
+                    </label>
+                    <button className="primary-action" onClick={handleRestart}>Новая игра</button>
+                </div>
+            </section>
+
+            <section className="match-panel">
+                <div className="score-strip">
+                    <div className={`player-card computer ${gameState.currentPlayer === 1 && !isBusy ? 'active' : ''}`}>
+                        <span className="player-label">Компьютер</span>
+                        <strong>{displayKazans[1]}</strong>
+                    </div>
+                    <div className="status-card">
+                        <span>{statusText}</span>
+                        <strong>{difficultyLabels[difficulty]}</strong>
+                    </div>
+                    <div className={`player-card human ${gameState.currentPlayer === 0 && !isBusy ? 'active' : ''}`}>
+                        <span className="player-label">Вы</span>
+                        <strong>{displayKazans[0]}</strong>
+                    </div>
                 </div>
 
-                {/* BOTTOM ROW (PLAYER) */}
-                <div className="otau-row">
-                    {bottomRowIndices.map(index => (
-                        <Otau 
-                            key={index} 
-                            index={index}
-                            count={displayBoard[index]}
-                            isEnabled={gameState.currentPlayer === 0 && !isBusy}
-                            isTuzdyk={displayTuzdyks.includes(index)}
-                            owner={displayTuzdyks.indexOf(index)}
-                            onClick={handlePocketClick}
-                            label={index + 1}
-                            isHighlighted={highlightIndex === index}
-                            animPhase={highlightIndex === index ? animPhase : null}
-                        />
-                    ))}
+                <div className="board-scroll" aria-label="Горизонтальная игровая доска">
+                    <div className="board-container">
+                        <div className="side-label opponent-label">Қарсылас</div>
+                        <div className="otau-row top-row">
+                            {topRowIndices.map((index) => (
+                                <Otau
+                                    key={index}
+                                    index={index}
+                                    count={displayBoard[index]}
+                                    isEnabled={false}
+                                    isTuzdyk={displayTuzdyks.includes(index)}
+                                    owner={displayTuzdyks.indexOf(index)}
+                                    onClick={() => {}}
+                                    label={index - 8}
+                                    isHighlighted={highlightIndex === index}
+                                    animPhase={highlightIndex === index ? animPhase : null}
+                                />
+                            ))}
+                        </div>
+
+                        <div className="kazan-section">
+                            <Kazan player={1} count={displayKazans[1]} isActive={gameState.currentPlayer === 1 && !isBusy} />
+                            <Kazan player={0} count={displayKazans[0]} isActive={gameState.currentPlayer === 0 && !isBusy} />
+                        </div>
+
+                        <div className="otau-row bottom-row">
+                            {bottomRowIndices.map((index) => (
+                                <Otau
+                                    key={index}
+                                    index={index}
+                                    count={displayBoard[index]}
+                                    isEnabled={gameState.currentPlayer === 0 && !isBusy}
+                                    isTuzdyk={displayTuzdyks.includes(index)}
+                                    owner={displayTuzdyks.indexOf(index)}
+                                    onClick={handlePocketClick}
+                                    label={index + 1}
+                                    isHighlighted={highlightIndex === index}
+                                    animPhase={highlightIndex === index ? animPhase : null}
+                                />
+                            ))}
+                        </div>
+                        <div className="side-label player-label-board">Ойыншы</div>
+                    </div>
                 </div>
-            </div>
+            </section>
 
             <div className={`modal-overlay ${gameState.isGameOver ? 'visible' : ''}`}>
-                <div className="modal-content glass">
-                    <h2>Ойын аяқталды!</h2>
-                    <p style={{fontSize: '2rem', color: '#38bdf8', fontWeight: 'bold'}}>{isWinner}</p>
-                    <p>Есеп: {gameState.kazans[0]} - {gameState.kazans[1]}</p>
-                    <button onClick={handleRestart} style={{
-                        background: '#38bdf8', color: '#0f172a', padding: '1rem 2rem', 
-                        fontSize: '1.2rem', fontWeight: 'bold', border: 'none', borderRadius: '12px',
-                        cursor: 'pointer', marginTop: '1rem'
-                    }}>
-                        Жаңа басынан
-                    </button>
+                <div className="modal-content">
+                    <span className="modal-kicker">Игра окончена</span>
+                    <h2>{winnerText}</h2>
+                    <p>Счет: {gameState.kazans[0]} - {gameState.kazans[1]}</p>
+                    <button className="primary-action" onClick={handleRestart}>Сыграть еще</button>
                 </div>
             </div>
-        </div>
+        </main>
     );
 }
 
