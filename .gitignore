@@ -1,3 +1,5 @@
 venv/
 __pycache__/
 *.pyc
+ai_learning.json
+ai_learning.json.tmp

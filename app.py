@@ -1,11 +1,24 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from game_logic import TogyzkumalakState
-from ai import get_best_move_mcts
+from ai import get_best_move_mcts, record_learning
 
 app = Flask(__name__)
 # Enable CORS for the React app port
 CORS(app)
+
+@app.route('/api/learn', methods=['POST'])
+def learn():
+    data = request.json or {}
+    samples = data.get('samples', [])
+    winner = data.get('winner', None)
+    ai_player = data.get('aiPlayer', 1)
+
+    if not isinstance(samples, list):
+        return jsonify({"error": "samples must be a list"}), 400
+
+    learned = record_learning(samples, winner, ai_player)
+    return jsonify({"ok": True, "learned": learned})
 
 @app.route('/api/best-move', methods=['POST'])
 def best_move():

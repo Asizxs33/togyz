@@ -1,9 +1,13 @@
 import math
+import json
+import os
 import random
 import time
 from game_logic import TogyzkumalakState
 
 CENTER_RELATIVE_PITS = {3, 4, 5}
+LEARNING_FILE = os.environ.get("TOGYZ_LEARNING_FILE", os.path.join(os.path.dirname(__file__), "ai_learning.json"))
+LEARNING_STATS = None
 
 
 def _side_range(player: int):
@@ -13,6 +17,92 @@ def _side_range(player: int):
 
 def _relative_pit(index: int) -> int:
     return index % 9
+
+
+def _state_key(state: TogyzkumalakState) -> str:
+    return "|".join((
+        ",".join(map(str, state.board)),
+        ",".join(map(str, state.kazans)),
+        ",".join(map(str, state.tuzdyks)),
+        str(state.currentPlayer),
+    ))
+
+
+def _load_learning() -> dict:
+    global LEARNING_STATS
+    if LEARNING_STATS is not None:
+        return LEARNING_STATS
+
+    try:
+        with open(LEARNING_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            LEARNING_STATS = data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        LEARNING_STATS = {}
+
+    return LEARNING_STATS
+
+
+def _save_learning() -> None:
+    if LEARNING_STATS is None:
+        return
+
+    tmp_file = f"{LEARNING_FILE}.tmp"
+    with open(tmp_file, "w", encoding="utf-8") as fh:
+        json.dump(LEARNING_STATS, fh, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp_file, LEARNING_FILE)
+
+
+def _learning_bias(state: TogyzkumalakState, move: int) -> float:
+    stats = _load_learning().get(f"{_state_key(state)}->{move}")
+    if not stats:
+        return 0.0
+
+    visits = max(1, stats.get("visits", 0))
+    value = stats.get("value", 0.0) / visits
+    confidence = min(1.0, visits / 12)
+    return max(-18.0, min(18.0, value * confidence * 18))
+
+
+def record_learning(samples, winner, ai_player=1):
+    stats = _load_learning()
+    if winner == ai_player:
+        result = 1.0
+    elif winner == -1 or winner is None:
+        result = 0.15
+    else:
+        result = -1.0
+
+    learned = 0
+    for sample in samples:
+        if sample.get("player") != ai_player:
+            continue
+
+        board = sample.get("board")
+        kazans = sample.get("kazans")
+        tuzdyks = sample.get("tuzdyks")
+        move = sample.get("move")
+        if not isinstance(board, list) or not isinstance(kazans, list) or not isinstance(tuzdyks, list):
+            continue
+        if not isinstance(move, int):
+            continue
+
+        state = TogyzkumalakState()
+        state.board = board[:18]
+        state.kazans = kazans[:2]
+        state.tuzdyks = tuzdyks[:2]
+        state.currentPlayer = sample.get("player", ai_player)
+
+        key = f"{_state_key(state)}->{move}"
+        entry = stats.setdefault(key, {"visits": 0, "value": 0.0})
+        entry["visits"] += 1
+        entry["value"] += result
+        learned += 1
+
+    if learned:
+        _save_learning()
+
+    return learned
 
 
 def _move_features(state: TogyzkumalakState, move: int, player: int):
@@ -78,6 +168,7 @@ def _tactical_move_score(state: TogyzkumalakState, move: int, player: int) -> fl
 
     # 7. Account for the opponent's next tactical reply.
     score -= _immediate_threat_score(features["state"], 1 - player) * 0.75
+    score += _learning_bias(state, move)
 
     return score
 
