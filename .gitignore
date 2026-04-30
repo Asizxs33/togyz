@@ -2,3 +2,5 @@ venv/
 __pycache__/
 *.pyc
 .env
+ai_learning.json
+ai_learning.json.tmp

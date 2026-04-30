@@ -4,3 +4,4 @@ gunicorn==21.2.0
 openai
 python-dotenv
 numpy>=1.24
+psycopg[binary]==3.2.9

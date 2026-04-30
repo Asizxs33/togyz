@@ -2,7 +2,13 @@ import math
 import random
 import time
 import os
+import json
 from game_logic import TogyzkumalakState
+
+try:
+    import psycopg
+except ImportError:
+    psycopg = None
 
 # Load .env for OPENAI_API_KEY
 try:
@@ -49,12 +55,196 @@ _load_nn()
 _TT: dict = {}
 _TT_EXACT, _TT_LOWER, _TT_UPPER = 0, 1, 2
 _TT_MAX = 300_000   # max entries; evict by clearing when full
+DATABASE_URL = os.environ.get("DATABASE_URL")
+LEARNING_FILE = os.environ.get("TOGYZ_LEARNING_FILE", os.path.join(os.path.dirname(__file__), "ai_learning.json"))
+LEARNING_STATS = None
+LEARNING_DB_READY = False
 
 def _tt_key(state: TogyzkumalakState):
     return (tuple(state.board),
             state.kazans[0], state.kazans[1],
             state.tuzdyks[0], state.tuzdyks[1],
             state.currentPlayer)
+
+
+def _state_key(state: TogyzkumalakState) -> str:
+    return "|".join((
+        ",".join(map(str, state.board)),
+        ",".join(map(str, state.kazans)),
+        ",".join(map(str, state.tuzdyks)),
+        str(state.currentPlayer),
+    ))
+
+
+def _learning_score(visits: int, value: float) -> float:
+    visits = max(1, visits)
+    average = value / visits
+    confidence = min(1.0, visits / 12)
+    return max(-18.0, min(18.0, average * confidence * 18))
+
+
+def _db_enabled() -> bool:
+    return bool(DATABASE_URL and psycopg)
+
+
+def _ensure_learning_table(conn) -> None:
+    global LEARNING_DB_READY
+    if LEARNING_DB_READY:
+        return
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_learning (
+                state_key TEXT NOT NULL,
+                move INTEGER NOT NULL,
+                visits INTEGER NOT NULL DEFAULT 0,
+                value DOUBLE PRECISION NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (state_key, move)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ai_learning_updated_at
+            ON ai_learning(updated_at DESC)
+            """
+        )
+    LEARNING_DB_READY = True
+
+
+def _db_learning_bias(state: TogyzkumalakState, move: int):
+    if not _db_enabled():
+        return None
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            _ensure_learning_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT visits, value FROM ai_learning WHERE state_key = %s AND move = %s",
+                    (_state_key(state), move),
+                )
+                row = cur.fetchone()
+    except Exception as e:
+        print(f"[AI] learning DB read fallback: {type(e).__name__}", flush=True)
+        return None
+
+    if not row:
+        return 0.0
+    return _learning_score(row[0], row[1])
+
+
+def _db_record_learning(updates) -> int:
+    if not updates or not _db_enabled():
+        return 0
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            _ensure_learning_table(conn)
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO ai_learning (state_key, move, visits, value)
+                    VALUES (%s, %s, 1, %s)
+                    ON CONFLICT (state_key, move)
+                    DO UPDATE SET
+                        visits = ai_learning.visits + 1,
+                        value = ai_learning.value + EXCLUDED.value,
+                        updated_at = NOW()
+                    """,
+                    updates,
+                )
+    except Exception as e:
+        print(f"[AI] learning DB write fallback: {type(e).__name__}", flush=True)
+        return 0
+
+    return len(updates)
+
+
+def _load_learning() -> dict:
+    global LEARNING_STATS
+    if LEARNING_STATS is not None:
+        return LEARNING_STATS
+
+    try:
+        with open(LEARNING_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            LEARNING_STATS = data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        LEARNING_STATS = {}
+
+    return LEARNING_STATS
+
+
+def _save_learning() -> None:
+    if LEARNING_STATS is None:
+        return
+
+    tmp_file = f"{LEARNING_FILE}.tmp"
+    with open(tmp_file, "w", encoding="utf-8") as fh:
+        json.dump(LEARNING_STATS, fh, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp_file, LEARNING_FILE)
+
+
+def _learning_bias(state: TogyzkumalakState, move: int) -> float:
+    db_bias = _db_learning_bias(state, move)
+    if db_bias is not None:
+        return db_bias
+
+    stats = _load_learning().get(f"{_state_key(state)}->{move}")
+    if not stats:
+        return 0.0
+
+    return _learning_score(stats.get("visits", 0), stats.get("value", 0.0))
+
+
+def record_learning(samples, winner, ai_player=1):
+    if winner == ai_player:
+        result = 1.0
+    elif winner == -1 or winner is None:
+        result = 0.15
+    else:
+        result = -1.0
+
+    updates = []
+    for sample in samples:
+        if sample.get("player") != ai_player:
+            continue
+
+        board = sample.get("board")
+        kazans = sample.get("kazans")
+        tuzdyks = sample.get("tuzdyks")
+        move = sample.get("move")
+        if not isinstance(board, list) or not isinstance(kazans, list) or not isinstance(tuzdyks, list):
+            continue
+        if not isinstance(move, int):
+            continue
+
+        state = TogyzkumalakState()
+        state.board = board[:18]
+        state.kazans = kazans[:2]
+        state.tuzdyks = [(t if t is not None else -1) for t in tuzdyks[:2]]
+        state.currentPlayer = sample.get("player", ai_player)
+
+        updates.append((_state_key(state), move, result))
+
+    learned = _db_record_learning(updates)
+    if learned:
+        return learned
+
+    stats = _load_learning()
+    for state_key, move, value in updates:
+        key = f"{state_key}->{move}"
+        entry = stats.setdefault(key, {"visits": 0, "value": 0.0})
+        entry["visits"] += 1
+        entry["value"] += value
+
+    if updates:
+        _save_learning()
+
+    return len(updates)
 
 # Killer moves: 2 per ply (distance from root), up to ply 32
 _killers: list = [[None, None] for _ in range(32)]
@@ -340,6 +530,7 @@ def order_moves(state: TogyzkumalakState, moves: list,
         # Policy network bonus (AlphaZero-lite): boosts moves NN thinks are good
         if policy_probs is not None:
             score += int(policy_probs[m % 9] * 80)
+        score += int(_learning_bias(state, m) * 4)
 
         # Picking up from a threatened pocket = defensive move (neutralizes threat)
         if m in threatened:
@@ -615,6 +806,7 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
                 child = root_state.clone()
                 child.makeMove(move)
                 score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline, ply=1)
+                score += _learning_bias(root_state, move)
                 depth_scores[move] = score
                 if score > best_score:
                     best_score   = score
@@ -634,6 +826,7 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
                     child = root_state.clone()
                     child.makeMove(move)
                     score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline, ply=1)
+                    score += _learning_bias(root_state, move)
                     depth_scores[move] = score
                     if score > best_score:
                         best_score   = score
