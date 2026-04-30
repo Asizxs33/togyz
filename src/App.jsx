@@ -193,8 +193,8 @@ function App() {
                         </div>
 
                         <div className="kazan-section">
-                            <Kazan player={1} count={displayKazans[1]} isActive={gameState.currentPlayer === 1 && !isBusy} />
                             <Kazan player={0} count={displayKazans[0]} isActive={gameState.currentPlayer === 0 && !isBusy} />
+                            <Kazan player={1} count={displayKazans[1]} isActive={gameState.currentPlayer === 1 && !isBusy} />
                         </div>
 
                         <div className="otau-row bottom-row">
