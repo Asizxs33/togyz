@@ -29,9 +29,12 @@ export class TogyzkumalakState {
     makeMove(index) {
         if (!this.isValidMove(this.currentPlayer, index)) return false;
 
+        const player = this.currentPlayer;
+        const tuzdykBefore = this.tuzdyks[player];
+
         let stones = this.board[index];
         this.board[index] = 0;
-        
+
         let currentIndex = index;
 
         if (stones === 1) {
@@ -47,14 +50,22 @@ export class TogyzkumalakState {
             }
         }
 
-        this.checkCaptureAndTuzdyk(currentIndex, this.currentPlayer);
+        this.checkCaptureAndTuzdyk(currentIndex, player);
+
+        // Турнирная нотация: пометка от-до (1..9 на своей стороне),
+        // 'x' — захват тұздық. Логика взята из togyz_js (yernarsha).
+        const tuzdykCreated = tuzdykBefore === -1 && this.tuzdyks[player] !== -1;
+        const fromLabel = (index % 9) + 1;
+        const toLabel = (currentIndex % 9) + 1;
+        const notation = `${fromLabel}-${toLabel}${tuzdykCreated ? 'x' : ''}`;
+
         this.checkGameState();
-        
+
         if (!this.isGameOver) {
-            this.currentPlayer = 1 - this.currentPlayer;
+            this.currentPlayer = 1 - player;
         }
 
-        return true;
+        return { notation, player, fromIndex: index, toIndex: currentIndex };
     }
 
     addStoneToPocket(index) {

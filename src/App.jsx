@@ -20,6 +20,7 @@ function snapshotState(state) {
 function App() {
     const [gameState, setGameState] = useState(new TogyzkumalakState());
     const [isAiThinking, setIsAiThinking] = useState(false);
+    const [moveHistory, setMoveHistory] = useState([]);
 
     const [isAnimating, setIsAnimating] = useState(false);
     const [animBoard, setAnimBoard] = useState(null);
@@ -76,7 +77,10 @@ function App() {
 
                     const frames = gameState.getMoveSteps(bestMove);
                     const finalState = gameState.clone();
-                    finalState.makeMove(bestMove);
+                    const moveResult = finalState.makeMove(bestMove);
+                    if (moveResult && moveResult.notation) {
+                        setMoveHistory((prev) => [...prev, { player: 1, notation: moveResult.notation }]);
+                    }
 
                     setIsAiThinking(false);
                     playAnimation(frames, finalState);
@@ -141,7 +145,10 @@ function App() {
             if (gameState.isValidMove(0, index)) {
                 const frames = gameState.getMoveSteps(index);
                 const finalState = gameState.clone();
-                finalState.makeMove(index);
+                const moveResult = finalState.makeMove(index);
+                if (moveResult && moveResult.notation) {
+                    setMoveHistory((prev) => [...prev, { player: 0, notation: moveResult.notation }]);
+                }
                 playAnimation(frames, finalState);
             }
         }
@@ -158,8 +165,22 @@ function App() {
         setIsAiThinking(false);
         aiMoveHistoryRef.current = [];
         learningSentRef.current = false;
+        setMoveHistory([]);
         setGameState(new TogyzkumalakState());
     };
+
+    // Группируем ходы парами (белые / чёрные) — нотация в стиле togyz_js (yernarsha).
+    const movePairs = useMemo(() => {
+        const pairs = [];
+        for (let i = 0; i < moveHistory.length; i += 2) {
+            pairs.push({
+                index: i / 2 + 1,
+                white: moveHistory[i],
+                black: moveHistory[i + 1] || null,
+            });
+        }
+        return pairs;
+    }, [moveHistory]);
 
     const topRowIndices = [17, 16, 15, 14, 13, 12, 11, 10, 9];
     const bottomRowIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -256,6 +277,26 @@ function App() {
                         <div className="side-label player-label-board">Ойыншы</div>
                     </div>
                 </div>
+            </section>
+
+            <section className="moves-panel" aria-label="История ходов">
+                <header className="moves-header">
+                    <span className="moves-title">История ходов</span>
+                    <span className="moves-counter">{moveHistory.length}</span>
+                </header>
+                {movePairs.length === 0 ? (
+                    <p className="moves-empty">Партия ещё не начата.</p>
+                ) : (
+                    <ol className="moves-list">
+                        {movePairs.map((pair) => (
+                            <li key={pair.index} className="moves-row">
+                                <span className="moves-index">{pair.index}.</span>
+                                <span className="moves-cell white">{pair.white?.notation || ''}</span>
+                                <span className="moves-cell black">{pair.black?.notation || ''}</span>
+                            </li>
+                        ))}
+                    </ol>
+                )}
             </section>
 
             <div className={`modal-overlay ${gameState.isGameOver ? 'visible' : ''}`}>

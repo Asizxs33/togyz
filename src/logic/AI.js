@@ -7,7 +7,10 @@ export function calculateBestMove(state, depth, player, algorithm = 'minimax') {
     // --- STANDARD MINIMAX WITH ITERATIVE DEEPENING & TRANSPOSITION TABLE ---
     let possibleMoves = state.getPossibleMoves(player);
     if (possibleMoves.length === 0) return -1;
-    
+    // Ранний выход при единственном легальном ходе — нет смысла запускать поиск.
+    // (Идея из kalah-torlenor / minimaxagent.py.)
+    if (possibleMoves.length === 1) return possibleMoves[0];
+
     let totalStones = 0;
     for (let i = 0; i < 18; i++) totalStones += state.board[i];
     

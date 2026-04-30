@@ -293,6 +293,17 @@ h1 {
   color: rgba(255, 250, 240, 0.84);
   font-size: 0.82rem;
   font-weight: 800;
+  text-align: center;
+  line-height: 1.05;
+}
+
+.otau-name {
+  display: block;
+  color: rgba(255, 244, 215, 0.72);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .otau {
@@ -485,6 +496,86 @@ h1 {
 
 .kazan-plus {
   margin-left: 2px;
+}
+
+.moves-panel {
+  margin-top: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.moves-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.moves-title {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.moves-counter {
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.moves-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.moves-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.moves-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.moves-row:nth-child(odd) {
+  background: rgba(115, 76, 37, 0.05);
+}
+
+.moves-index {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.moves-cell {
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.moves-cell.white {
+  color: var(--blue);
+}
+
+.moves-cell.black {
+  color: var(--rose);
 }
 
 .modal-overlay {

@@ -1,6 +1,21 @@
 import React from 'react';
 
+// Традиционные казахские названия отау (порядок 1..9)
+// Источник: gym-togyzkumalak (zhasulan), Otau-таблица.
+const OTAU_NAMES = [
+    'Арт',
+    'Тектұрмас',
+    'Ат өтпес',
+    'Атсыратар',
+    'Бел',
+    'Белбасар',
+    'Қандықақпан',
+    'Көкмойын',
+    'Маңдай',
+];
+
 export const Otau = ({ index, count, isEnabled, isTuzdyk, owner, onClick, label, isHighlighted, animPhase }) => {
+    const otauName = OTAU_NAMES[(index % 9)] || '';
     let className = 'otau';
     if (isEnabled && count > 0) className += ' enabled';
     else className += ' disabled';
@@ -24,13 +39,16 @@ export const Otau = ({ index, count, isEnabled, isTuzdyk, owner, onClick, label,
 
     return (
         <div className="otau-wrapper">
-            <span className="pocket-label top-label">{index >= 9 ? label : ''}</span>
+            <span className="pocket-label top-label">
+                {index >= 9 ? <><span className="otau-name">{otauName}</span> {label}</> : ''}
+            </span>
 
             <button
                 className={className}
                 onClick={() => (isEnabled && count > 0) ? onClick(index) : null}
                 disabled={!isEnabled || count === 0}
-                aria-label={`Отау ${label}, ${count} камней`}
+                aria-label={`Отау ${label} (${otauName}), ${count} камней`}
+                title={`${otauName} • №${label}`}
             >
                 {isTuzdyk ? (
                     <span className="tuzdyk-flag">
@@ -45,7 +63,9 @@ export const Otau = ({ index, count, isEnabled, isTuzdyk, owner, onClick, label,
                 <span className="count-badge">{isTuzdyk ? 'Т' : count}</span>
             </button>
 
-            <span className="pocket-label bottom-label">{index < 9 ? label : ''}</span>
+            <span className="pocket-label bottom-label">
+                {index < 9 ? <><span className="otau-name">{otauName}</span> {label}</> : ''}
+            </span>
         </div>
     );
 };
