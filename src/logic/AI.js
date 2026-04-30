@@ -34,8 +34,7 @@ export function calculateBestMove(state, depth, player, algorithm = 'minimax') {
     
     let currentDepth = 1;
 
-    // Move Ordering: Evaluate pockets with the most stones first to maximize alpha-beta pruning
-    possibleMoves.sort((a, b) => state.board[b] - state.board[a]);
+    possibleMoves = orderMoves(state, possibleMoves, player);
     
     while (currentDepth <= activeDepth) {
         let maxEval = -Infinity;
@@ -67,7 +66,10 @@ export function calculateBestMove(state, depth, player, algorithm = 'minimax') {
             
             // Re-order the best moves to the front for the next iteration step (Principal Variation ordering logic)
             const bestMoveSet = new Set(bestMovesArr);
-            possibleMoves.sort((a, b) => (bestMoveSet.has(b) ? 1 : 0) - (bestMoveSet.has(a) ? 1 : 0));
+            possibleMoves.sort((a, b) => {
+                const pvScore = (bestMoveSet.has(b) ? 1 : 0) - (bestMoveSet.has(a) ? 1 : 0);
+                return pvScore || tacticalMoveScore(state, b, player) - tacticalMoveScore(state, a, player);
+            });
         }
         
         if (absoluteBestEval > 9000) break; // Found a winning path!
@@ -209,9 +211,7 @@ function minimax(state, depth, alpha, beta, isMaximizing, player, tt, startTime,
         return evaluateBoard(state, player);
     }
     
-    // Move Ordering: Evaluate pockets with the most stones first to maximize alpha-beta pruning
-    const possibleMoves = state.getPossibleMoves(state.currentPlayer);
-    possibleMoves.sort((a, b) => state.board[b] - state.board[a]);
+    const possibleMoves = orderMoves(state, state.getPossibleMoves(state.currentPlayer), state.currentPlayer);
     
     let bestVal = isMaximizing ? -Infinity : Infinity;
     let originalAlpha = alpha;
@@ -249,67 +249,112 @@ function evaluateBoard(state, player) {
         return 0; // Draw
     }
     
+    return evaluateTactics(state, player);
+}
+
+function sideRange(player) {
+    const start = player === 0 ? 0 : 9;
+    return Array.from({ length: 9 }, (_, i) => start + i);
+}
+
+function relativePit(index) {
+    return index % 9;
+}
+
+function getMoveFeatures(state, move, player) {
+    const beforeKazan = state.kazans[player];
+    const beforeTuzdyk = state.tuzdyks[player];
+    const beforeCount = state.board[move];
+    const nextState = state.clone();
+    nextState.makeMove(move);
+
+    const ownEvenAfter = sideRange(player)
+        .filter((index) => nextState.board[index] > 0 && nextState.board[index] % 2 === 0)
+        .reduce((sum, index) => sum + nextState.board[index], 0);
+
+    const activeAfter = sideRange(player)
+        .filter((index) => nextState.board[index] > 0)
+        .length;
+
+    return {
+        state: nextState,
+        captureGain: nextState.kazans[player] - beforeKazan,
+        tuzdykCreated: beforeTuzdyk === -1 && nextState.tuzdyks[player] !== -1,
+        ownEvenAfter,
+        activeAfter,
+        largeSetup: beforeCount >= 10,
+    };
+}
+
+function tacticalMoveScore(state, move, player) {
+    const features = getMoveFeatures(state, move, player);
+    let score = 0;
+
+    score += features.captureGain * 2.5;
+    score -= features.ownEvenAfter * 0.9;
+    if (features.tuzdykCreated) score += 100;
+    score += features.activeAfter * 1.5;
+    if (features.largeSetup) score += Math.min(state.board[move], 18) * 0.35;
+    score -= immediateThreatScore(features.state, 1 - player) * 0.75;
+
+    return score;
+}
+
+function orderMoves(state, moves, player) {
+    return [...moves].sort((a, b) => tacticalMoveScore(state, b, player) - tacticalMoveScore(state, a, player));
+}
+
+function immediateThreatScore(state, player) {
+    const moves = state.getPossibleMoves(player);
+    if (moves.length === 0) return 0;
+
+    return moves.reduce((best, move) => {
+        const features = getMoveFeatures(state, move, player);
+        let score = features.captureGain;
+        if (features.tuzdykCreated) score += 35;
+        return Math.max(best, score);
+    }, 0);
+}
+
+function evaluateTactics(state, player) {
     const opponent = 1 - player;
-    
-    // Weights corresponding to Togyzkumalak principles
-    const WEIGHT_K = 10;   // Principle 1: Maximize Kazans
-    const WEIGHT_T = 500;  // Principle 2: Tuzdyk (Extremely powerful)
-    const WEIGHT_V = 3;    // Principle 4: Vulnerability (Limit opponent's even pockets)
-    const WEIGHT_M = 0.5;  // Principle 5: Mobility (Avoid Atsyrau)
-    const WEIGHT_C = 0.5;  // Principle 6: Central control (pockets 4,5,6)
-    
-    // 1. K (Kazan)
-    const kazanScore = (state.kazans[player] - state.kazans[opponent]) * WEIGHT_K;
-    
-    // 2. T (Tuzdyk)
-    let tuzdykScore = 0;
-    if (state.tuzdyks[player] !== -1) tuzdykScore += WEIGHT_T;
-    if (state.tuzdyks[opponent] !== -1) tuzdykScore -= WEIGHT_T;
-    
-    // 3. M & C (Mobility & Center Control)
-    let myMobility = 0;
-    let myCenter = 0;
-    const myStart = player === 0 ? 0 : 9;
-    const myEnd = player === 0 ? 8 : 17;
-    for (let i = myStart; i <= myEnd; i++) {
-        myMobility += state.board[i];
-        if (i >= myStart + 3 && i <= myStart + 5) {
-            myCenter += state.board[i];
+    const totalStones = state.board.reduce((sum, stones) => sum + stones, 0);
+    const progress = 1 - totalStones / 162;
+    const kazanWeight = 4 + progress * 5;
+
+    let score = (state.kazans[player] - state.kazans[opponent]) * kazanWeight;
+
+    for (const [owner, sign] of [[player, 1], [opponent, -1]]) {
+        const tuzdyk = state.tuzdyks[owner];
+        if (tuzdyk !== -1) {
+            const centerBonus = Math.max(0, 4 - Math.abs(relativePit(tuzdyk) - 4)) * 3;
+            score += sign * (35 + centerBonus);
         }
     }
-    
-    let oppMobility = 0;
-    let oppCenter = 0;
-    const oppStart = opponent === 0 ? 0 : 9;
-    const oppEnd = opponent === 0 ? 8 : 17;
-    for (let i = oppStart; i <= oppEnd; i++) {
-        oppMobility += state.board[i];
-        if (i >= oppStart + 3 && i <= oppStart + 5) {
-            oppCenter += state.board[i];
+
+    for (const [owner, sign] of [[player, 1], [opponent, -1]]) {
+        let active = 0;
+        let centerStones = 0;
+        let evenDanger = 0;
+        let largeSetup = 0;
+
+        for (const index of sideRange(owner)) {
+            const stones = state.board[index];
+            if (stones <= 0) continue;
+            active++;
+            if (relativePit(index) >= 3 && relativePit(index) <= 5) centerStones += stones;
+            if (stones % 2 === 0) evenDanger += stones;
+            if (stones >= 10) largeSetup += Math.min(stones, 18);
         }
+
+        score += sign * active * 1.5;
+        score += sign * centerStones * 0.45;
+        score -= sign * evenDanger * 0.9;
+        score += sign * largeSetup * 0.22;
     }
-    const mobilityScore = (myMobility - oppMobility) * WEIGHT_M;
-    const centerScore = (myCenter - oppCenter) * WEIGHT_C;
-    
-    // 4. V (Vulnerability - count my even pockets vs their even pockets)
-    // Principle 4: limit opponent win probability by limiting evens
-    let myVulnerability = 0;
-    for (let i = myStart; i <= myEnd; i++) {
-        if (state.board[i] > 0 && state.board[i] % 2 === 0) {
-            myVulnerability++;
-        }
-    }
-    
-    let oppVulnerability = 0;
-    for (let i = oppStart; i <= oppEnd; i++) {
-        if (state.board[i] > 0 && state.board[i] % 2 === 0) {
-            oppVulnerability++;
-        }
-    }
-    
-    // If opponent has more vulnerable pockets, it's good for me.
-    const vulnerabilityScore = (oppVulnerability - myVulnerability) * WEIGHT_V;
-    
-    // Total Heuristic Evaluation
-    return kazanScore + tuzdykScore + mobilityScore + vulnerabilityScore + centerScore;
+
+    score -= immediateThreatScore(state, opponent) * 1.1;
+    score += immediateThreatScore(state, player) * 0.45;
+
+    return score;
 }
