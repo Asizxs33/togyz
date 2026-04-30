@@ -1,11 +1,15 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from game_logic import TogyzkumalakState
-from ai import get_best_move_alphabeta, record_learning
+from ai import get_ai_status, get_best_move_alphabeta, record_learning
 
 app = Flask(__name__)
 # Enable CORS for the React app port
 CORS(app)
+
+@app.route('/api/ai-status', methods=['GET'])
+def ai_status():
+    return jsonify(get_ai_status())
 
 @app.route('/api/learn', methods=['POST'])
 def learn():

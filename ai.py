@@ -246,6 +246,17 @@ def record_learning(samples, winner, ai_player=1):
 
     return len(updates)
 
+
+def get_ai_status():
+    return {
+        "modelLoaded": _nn is not None,
+        "modelKeys": sorted(_nn.keys()) if _nn is not None else [],
+        "learningBackend": "postgres" if _db_enabled() else "json",
+        "databaseConfigured": bool(DATABASE_URL),
+        "postgresDriverLoaded": psycopg is not None,
+        "gymEnvironment": "togyzkumalak_gym_env.TogyzkumalakGymEnv",
+    }
+
 # Killer moves: 2 per ply (distance from root), up to ply 32
 _killers: list = [[None, None] for _ in range(32)]
 
