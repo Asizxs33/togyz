@@ -5,17 +5,10 @@ import { Otau } from './components/Otau';
 import { Kazan } from './components/Kazan';
 
 const ANIM_DELAY = 180;
-
-const difficultyLabels = {
-    2: 'Легкий',
-    3: 'Средний',
-    5: 'Сложный',
-    mcts: 'MCTS AI',
-};
+const AI_MODE_LABEL = 'MCTS AI';
 
 function App() {
     const [gameState, setGameState] = useState(new TogyzkumalakState());
-    const [difficulty, setDifficulty] = useState(3);
     const [isAiThinking, setIsAiThinking] = useState(false);
 
     const [isAnimating, setIsAnimating] = useState(false);
@@ -75,43 +68,35 @@ function App() {
                 }
             };
 
-            if (difficulty === 'mcts') {
-                const payload = {
-                    board: gameState.board,
-                    kazans: gameState.kazans,
-                    tuzdyks: gameState.tuzdyks,
-                    currentPlayer: gameState.currentPlayer,
-                    isGameOver: gameState.isGameOver,
-                    winner: gameState.winner,
-                    algorithm: 'mcts',
-                    iterations: 20000,
-                    max_time_seconds: 3.0,
-                };
+            const payload = {
+                board: gameState.board,
+                kazans: gameState.kazans,
+                tuzdyks: gameState.tuzdyks,
+                currentPlayer: gameState.currentPlayer,
+                isGameOver: gameState.isGameOver,
+                winner: gameState.winner,
+                algorithm: 'mcts',
+                iterations: 20000,
+                max_time_seconds: 3.0,
+            };
 
-                fetch('https://togyz.onrender.com/api/best-move', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+            fetch('https://togyz.onrender.com/api/best-move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            })
+                .then((res) => res.json())
+                .then((data) => {
+                    handleBestMove(data.move);
                 })
-                    .then((res) => res.json())
-                    .then((data) => {
-                        handleBestMove(data.move);
-                    })
-                    .catch((err) => {
-                        console.error('Failed to reach Python backend:', err);
-                        alert('Не удалось подключиться к AI-серверу. Включен локальный сложный режим.');
-                        const fallbackMove = calculateBestMove(gameState, 5, 1, 'minimax');
-                        setTimeout(() => handleBestMove(fallbackMove), 400);
-                    });
-            } else {
-                setTimeout(() => {
-                    const depth = parseInt(difficulty);
-                    const bestMove = calculateBestMove(gameState, depth, 1, 'minimax');
-                    handleBestMove(bestMove);
-                }, 400);
-            }
+                .catch((err) => {
+                    console.error('Failed to reach Python backend:', err);
+                    alert('Не удалось подключиться к AI-серверу. Включен локальный сложный режим.');
+                    const fallbackMove = calculateBestMove(gameState, 5, 1, 'minimax');
+                    setTimeout(() => handleBestMove(fallbackMove), 400);
+                });
         }
-    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, difficulty, gameState, playAnimation]);
+    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, gameState, playAnimation]);
 
     const handlePocketClick = useCallback((index) => {
         if (gameState.currentPlayer === 0 && !gameState.isGameOver && !isAiThinking && !isAnimating) {
@@ -163,15 +148,10 @@ function App() {
                 </div>
 
                 <div className="control-panel" aria-label="Настройки игры">
-                    <label className="select-field">
-                        <span>Сложность</span>
-                        <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={isBusy}>
-                            <option value="2">Легкий</option>
-                            <option value="3">Средний</option>
-                            <option value="5">Сложный</option>
-                            <option value="mcts">MCTS AI</option>
-                        </select>
-                    </label>
+                    <div className="ai-mode-badge">
+                        <span>AI режим</span>
+                        <strong>{AI_MODE_LABEL}</strong>
+                    </div>
                     <button className="primary-action" onClick={handleRestart}>Новая игра</button>
                 </div>
             </section>
@@ -184,7 +164,7 @@ function App() {
                     </div>
                     <div className="status-card">
                         <span>{statusText}</span>
-                        <strong>{difficultyLabels[difficulty]}</strong>
+                        <strong>{AI_MODE_LABEL}</strong>
                     </div>
                     <div className={`player-card human ${gameState.currentPlayer === 0 && !isBusy ? 'active' : ''}`}>
                         <span className="player-label">Вы</span>

@@ -114,6 +114,31 @@ h1 {
   min-width: 180px;
 }
 
+.ai-mode-badge {
+  min-height: 44px;
+  min-width: 140px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf8;
+}
+
+.ai-mode-badge span {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ai-mode-badge strong {
+  font-size: 0.96rem;
+  line-height: 1;
+}
+
 .select-field select {
   height: 44px;
   border: 1px solid var(--line);
@@ -561,6 +586,10 @@ h1 {
     align-items: stretch;
   }
 
+  .ai-mode-badge {
+    flex: 1;
+  }
+
   .select-field {
     flex: 1;
   }
@@ -600,6 +629,7 @@ h1 {
   }
 
   .primary-action,
+  .ai-mode-badge,
   .select-field,
   .select-field select {
     width: 100%;
@@ -693,6 +723,20 @@ h1 {
 
   .select-field {
     gap: 4px;
+  }
+
+  .ai-mode-badge {
+    min-height: 38px;
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+
+  .ai-mode-badge span {
+    font-size: 0.56rem;
+  }
+
+  .ai-mode-badge strong {
+    font-size: 0.82rem;
   }
 
   .select-field select,
