@@ -5,9 +5,16 @@ import random
 import time
 from game_logic import TogyzkumalakState
 
+try:
+    import psycopg
+except ImportError:
+    psycopg = None
+
 CENTER_RELATIVE_PITS = {3, 4, 5}
+DATABASE_URL = os.environ.get("DATABASE_URL")
 LEARNING_FILE = os.environ.get("TOGYZ_LEARNING_FILE", os.path.join(os.path.dirname(__file__), "ai_learning.json"))
 LEARNING_STATS = None
+LEARNING_DB_READY = False
 
 
 def _side_range(player: int):
@@ -26,6 +33,91 @@ def _state_key(state: TogyzkumalakState) -> str:
         ",".join(map(str, state.tuzdyks)),
         str(state.currentPlayer),
     ))
+
+
+def _learning_score(visits: int, value: float) -> float:
+    visits = max(1, visits)
+    average = value / visits
+    confidence = min(1.0, visits / 12)
+    return max(-18.0, min(18.0, average * confidence * 18))
+
+
+def _db_enabled() -> bool:
+    return bool(DATABASE_URL and psycopg)
+
+
+def _ensure_learning_table(conn) -> None:
+    global LEARNING_DB_READY
+    if LEARNING_DB_READY:
+        return
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_learning (
+                state_key TEXT NOT NULL,
+                move INTEGER NOT NULL,
+                visits INTEGER NOT NULL DEFAULT 0,
+                value DOUBLE PRECISION NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (state_key, move)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ai_learning_updated_at
+            ON ai_learning(updated_at DESC)
+            """
+        )
+    LEARNING_DB_READY = True
+
+
+def _db_learning_bias(state: TogyzkumalakState, move: int):
+    if not _db_enabled():
+        return None
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            _ensure_learning_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT visits, value FROM ai_learning WHERE state_key = %s AND move = %s",
+                    (_state_key(state), move),
+                )
+                row = cur.fetchone()
+    except Exception:
+        return None
+
+    if not row:
+        return 0.0
+    return _learning_score(row[0], row[1])
+
+
+def _db_record_learning(updates) -> int:
+    if not updates or not _db_enabled():
+        return 0
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            _ensure_learning_table(conn)
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO ai_learning (state_key, move, visits, value)
+                    VALUES (%s, %s, 1, %s)
+                    ON CONFLICT (state_key, move)
+                    DO UPDATE SET
+                        visits = ai_learning.visits + 1,
+                        value = ai_learning.value + EXCLUDED.value,
+                        updated_at = NOW()
+                    """,
+                    updates,
+                )
+    except Exception:
+        return 0
+
+    return len(updates)
 
 
 def _load_learning() -> dict:
@@ -54,18 +146,18 @@ def _save_learning() -> None:
 
 
 def _learning_bias(state: TogyzkumalakState, move: int) -> float:
+    db_bias = _db_learning_bias(state, move)
+    if db_bias is not None:
+        return db_bias
+
     stats = _load_learning().get(f"{_state_key(state)}->{move}")
     if not stats:
         return 0.0
 
-    visits = max(1, stats.get("visits", 0))
-    value = stats.get("value", 0.0) / visits
-    confidence = min(1.0, visits / 12)
-    return max(-18.0, min(18.0, value * confidence * 18))
+    return _learning_score(stats.get("visits", 0), stats.get("value", 0.0))
 
 
 def record_learning(samples, winner, ai_player=1):
-    stats = _load_learning()
     if winner == ai_player:
         result = 1.0
     elif winner == -1 or winner is None:
@@ -73,7 +165,7 @@ def record_learning(samples, winner, ai_player=1):
     else:
         result = -1.0
 
-    learned = 0
+    updates = []
     for sample in samples:
         if sample.get("player") != ai_player:
             continue
@@ -93,16 +185,23 @@ def record_learning(samples, winner, ai_player=1):
         state.tuzdyks = tuzdyks[:2]
         state.currentPlayer = sample.get("player", ai_player)
 
-        key = f"{_state_key(state)}->{move}"
+        updates.append((_state_key(state), move, result))
+
+    learned = _db_record_learning(updates)
+    if learned:
+        return learned
+
+    stats = _load_learning()
+    for state_key, move, value in updates:
+        key = f"{state_key}->{move}"
         entry = stats.setdefault(key, {"visits": 0, "value": 0.0})
         entry["visits"] += 1
-        entry["value"] += result
-        learned += 1
+        entry["value"] += value
 
-    if learned:
+    if updates:
         _save_learning()
 
-    return learned
+    return len(updates)
 
 
 def _move_features(state: TogyzkumalakState, move: int, player: int):
