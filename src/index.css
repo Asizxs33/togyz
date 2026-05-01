@@ -149,6 +149,38 @@ h1 {
   outline: none;
 }
 
+.start-toggle {
+  display: inline-flex;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf8;
+  overflow: hidden;
+}
+
+.toggle-btn {
+  padding: 0 14px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.toggle-btn + .toggle-btn {
+  border-left: 1px solid var(--line);
+}
+
+.toggle-btn:hover {
+  color: var(--ink);
+}
+
+.toggle-btn.active {
+  background: linear-gradient(135deg, #1f2937, #43301f);
+  color: #fffaf0;
+}
+
 .primary-action {
   min-height: 44px;
   padding: 0 18px;
@@ -293,17 +325,6 @@ h1 {
   color: rgba(255, 250, 240, 0.84);
   font-size: 0.82rem;
   font-weight: 800;
-  text-align: center;
-  line-height: 1.05;
-}
-
-.otau-name {
-  display: block;
-  color: rgba(255, 244, 215, 0.72);
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: none;
 }
 
 .otau {
@@ -344,8 +365,8 @@ h1 {
 }
 
 .kumalak-grid {
-  display: flex;
-  flex-wrap: wrap-reverse;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
   align-content: center;
   justify-content: center;
   gap: clamp(4px, 0.55vw, 7px);
@@ -396,16 +417,6 @@ h1 {
   font-size: 0.82rem;
   font-weight: 900;
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.22);
-}
-
-.plus-more {
-  align-self: center;
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: #fffaf0;
-  background: rgba(32, 26, 20, 0.78);
-  font-size: 0.76rem;
-  font-weight: 800;
 }
 
 .tuzdyk-p1,
@@ -922,11 +933,6 @@ h1 {
     height: 16px;
     padding: 0 4px;
     font-size: 0.55rem;
-  }
-
-  .plus-more {
-    padding: 1px 4px;
-    font-size: 0.52rem;
   }
 
   .tuzdyk-flag {

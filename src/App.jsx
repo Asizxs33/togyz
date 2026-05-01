@@ -21,6 +21,8 @@ function App() {
     const [gameState, setGameState] = useState(new TogyzkumalakState());
     const [isAiThinking, setIsAiThinking] = useState(false);
     const [moveHistory, setMoveHistory] = useState([]);
+    const [humanPlayer, setHumanPlayer] = useState(0);
+    const aiPlayer = 1 - humanPlayer;
 
     const [isAnimating, setIsAnimating] = useState(false);
     const [animBoard, setAnimBoard] = useState(null);
@@ -65,7 +67,7 @@ function App() {
     }, []);
 
     useEffect(() => {
-        if (gameState.currentPlayer === 1 && !gameState.isGameOver && !isAiThinking && !isAnimating) {
+        if (gameState.currentPlayer === aiPlayer && !gameState.isGameOver && !isAiThinking && !isAnimating) {
             setIsAiThinking(true);
 
             const handleBestMove = (bestMove) => {
@@ -79,7 +81,7 @@ function App() {
                     const finalState = gameState.clone();
                     const moveResult = finalState.makeMove(bestMove);
                     if (moveResult && moveResult.notation) {
-                        setMoveHistory((prev) => [...prev, { player: 1, notation: moveResult.notation }]);
+                        setMoveHistory((prev) => [...prev, { player: aiPlayer, notation: moveResult.notation }]);
                     }
 
                     setIsAiThinking(false);
@@ -113,11 +115,11 @@ function App() {
                 .catch((err) => {
                     console.error('Failed to reach Python backend:', err);
                     alert('Не удалось подключиться к AI-серверу. Включен локальный сложный режим.');
-                    const fallbackMove = calculateBestMove(gameState, 5, 1, 'minimax');
+                    const fallbackMove = calculateBestMove(gameState, 5, aiPlayer, 'minimax');
                     setTimeout(() => handleBestMove(fallbackMove), 400);
                 });
         }
-    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, gameState, playAnimation]);
+    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, gameState, playAnimation, aiPlayer]);
 
     useEffect(() => {
         if (!gameState.isGameOver || learningSentRef.current) return;
@@ -132,29 +134,29 @@ function App() {
             body: JSON.stringify({
                 samples,
                 winner: gameState.winner,
-                aiPlayer: 1,
+                aiPlayer,
                 finalKazans: gameState.kazans,
             }),
         }).catch((err) => {
             console.error('Failed to submit AI learning data:', err);
         });
-    }, [gameState.isGameOver, gameState.winner, gameState.kazans]);
+    }, [gameState.isGameOver, gameState.winner, gameState.kazans, aiPlayer]);
 
     const handlePocketClick = useCallback((index) => {
-        if (gameState.currentPlayer === 0 && !gameState.isGameOver && !isAiThinking && !isAnimating) {
-            if (gameState.isValidMove(0, index)) {
+        if (gameState.currentPlayer === humanPlayer && !gameState.isGameOver && !isAiThinking && !isAnimating) {
+            if (gameState.isValidMove(humanPlayer, index)) {
                 const frames = gameState.getMoveSteps(index);
                 const finalState = gameState.clone();
                 const moveResult = finalState.makeMove(index);
                 if (moveResult && moveResult.notation) {
-                    setMoveHistory((prev) => [...prev, { player: 0, notation: moveResult.notation }]);
+                    setMoveHistory((prev) => [...prev, { player: humanPlayer, notation: moveResult.notation }]);
                 }
                 playAnimation(frames, finalState);
             }
         }
-    }, [gameState, isAiThinking, isAnimating, playAnimation]);
+    }, [gameState, isAiThinking, isAnimating, playAnimation, humanPlayer]);
 
-    const handleRestart = () => {
+    const handleRestart = useCallback((nextHumanPlayer = humanPlayer) => {
         if (animTimerRef.current) clearTimeout(animTimerRef.current);
         setAnimBoard(null);
         setAnimKazans(null);
@@ -166,8 +168,9 @@ function App() {
         aiMoveHistoryRef.current = [];
         learningSentRef.current = false;
         setMoveHistory([]);
+        setHumanPlayer(nextHumanPlayer);
         setGameState(new TogyzkumalakState());
-    };
+    }, [humanPlayer]);
 
     // Группируем ходы парами (белые / чёрные) — нотация в стиле togyz_js (yernarsha).
     const movePairs = useMemo(() => {
@@ -186,9 +189,9 @@ function App() {
     const bottomRowIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
     const isBusy = isAnimating || isAiThinking;
-    const winnerText = gameState.winner === 0
+    const winnerText = gameState.winner === humanPlayer
         ? 'Вы выиграли'
-        : gameState.winner === 1
+        : gameState.winner === aiPlayer
             ? 'Компьютер выиграл'
             : 'Ничья';
 
@@ -196,8 +199,8 @@ function App() {
         if (gameState.isGameOver) return 'Партия завершена';
         if (isAiThinking) return 'Компьютер думает';
         if (isAnimating) return 'Ход выполняется';
-        return gameState.currentPlayer === 0 ? 'Ваш ход' : 'Ход компьютера';
-    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating]);
+        return gameState.currentPlayer === humanPlayer ? 'Ваш ход' : 'Ход компьютера';
+    }, [gameState.currentPlayer, gameState.isGameOver, isAiThinking, isAnimating, humanPlayer]);
 
     return (
         <main className="app-shell">
@@ -213,39 +216,57 @@ function App() {
                         <span>AI режим</span>
                         <strong>{AI_MODE_LABEL}</strong>
                     </div>
-                    <button className="primary-action" onClick={handleRestart}>Новая игра</button>
+                    <div className="start-toggle" role="group" aria-label="Кто ходит первым">
+                        <button
+                            type="button"
+                            className={`toggle-btn ${humanPlayer === 0 ? 'active' : ''}`}
+                            onClick={() => handleRestart(0)}
+                            aria-pressed={humanPlayer === 0}
+                        >
+                            Я первым
+                        </button>
+                        <button
+                            type="button"
+                            className={`toggle-btn ${humanPlayer === 1 ? 'active' : ''}`}
+                            onClick={() => handleRestart(1)}
+                            aria-pressed={humanPlayer === 1}
+                        >
+                            ИИ первым
+                        </button>
+                    </div>
+                    <button className="primary-action" onClick={() => handleRestart()}>Новая игра</button>
                 </div>
             </section>
 
             <section className="match-panel">
                 <div className="score-strip">
-                    <div className={`player-card computer ${gameState.currentPlayer === 1 && !isBusy ? 'active' : ''}`}>
+                    <div className={`player-card computer ${gameState.currentPlayer === aiPlayer && !isBusy ? 'active' : ''}`}>
                         <span className="player-label">Компьютер</span>
-                        <strong>{displayKazans[1]}</strong>
+                        <strong>{displayKazans[aiPlayer]}</strong>
                     </div>
                     <div className="status-card">
                         <span>{statusText}</span>
                         <strong>{AI_MODE_LABEL}</strong>
                     </div>
-                    <div className={`player-card human ${gameState.currentPlayer === 0 && !isBusy ? 'active' : ''}`}>
+                    <div className={`player-card human ${gameState.currentPlayer === humanPlayer && !isBusy ? 'active' : ''}`}>
                         <span className="player-label">Вы</span>
-                        <strong>{displayKazans[0]}</strong>
+                        <strong>{displayKazans[humanPlayer]}</strong>
                     </div>
                 </div>
 
                 <div className="board-scroll" aria-label="Горизонтальная игровая доска">
                     <div className="board-container">
-                        <div className="side-label opponent-label">Қарсылас</div>
+                        <div className="side-label opponent-label">{humanPlayer === 0 ? 'Қарсылас' : 'Ойыншы'}</div>
                         <div className="otau-row top-row">
                             {topRowIndices.map((index) => (
                                 <Otau
                                     key={index}
                                     index={index}
                                     count={displayBoard[index]}
-                                    isEnabled={false}
+                                    isEnabled={humanPlayer === 1 && gameState.currentPlayer === 1 && !isBusy}
                                     isTuzdyk={displayTuzdyks.includes(index)}
                                     owner={displayTuzdyks.indexOf(index)}
-                                    onClick={() => {}}
+                                    onClick={humanPlayer === 1 ? handlePocketClick : () => {}}
                                     label={index - 8}
                                     isHighlighted={highlightIndex === index}
                                     animPhase={highlightIndex === index ? animPhase : null}
@@ -264,17 +285,17 @@ function App() {
                                     key={index}
                                     index={index}
                                     count={displayBoard[index]}
-                                    isEnabled={gameState.currentPlayer === 0 && !isBusy}
+                                    isEnabled={humanPlayer === 0 && gameState.currentPlayer === 0 && !isBusy}
                                     isTuzdyk={displayTuzdyks.includes(index)}
                                     owner={displayTuzdyks.indexOf(index)}
-                                    onClick={handlePocketClick}
+                                    onClick={humanPlayer === 0 ? handlePocketClick : () => {}}
                                     label={index + 1}
                                     isHighlighted={highlightIndex === index}
                                     animPhase={highlightIndex === index ? animPhase : null}
                                 />
                             ))}
                         </div>
-                        <div className="side-label player-label-board">Ойыншы</div>
+                        <div className="side-label player-label-board">{humanPlayer === 0 ? 'Ойыншы' : 'Қарсылас'}</div>
                     </div>
                 </div>
             </section>
@@ -303,8 +324,8 @@ function App() {
                 <div className="modal-content">
                     <span className="modal-kicker">Игра окончена</span>
                     <h2>{winnerText}</h2>
-                    <p>Счет: {gameState.kazans[0]} - {gameState.kazans[1]}</p>
-                    <button className="primary-action" onClick={handleRestart}>Сыграть еще</button>
+                    <p>Счет: вы {gameState.kazans[humanPlayer]} – {gameState.kazans[aiPlayer]} компьютер</p>
+                    <button className="primary-action" onClick={() => handleRestart()}>Сыграть еще</button>
                 </div>
             </div>
         </main>
