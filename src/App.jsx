@@ -100,7 +100,7 @@ function App() {
                 winner: gameState.winner,
                 algorithm: 'mcts',
                 iterations: 20000,
-                max_time_seconds: 3.0,
+                max_time_seconds: 6.0,
             };
 
             fetch(`${AI_API_BASE}/api/best-move`, {
