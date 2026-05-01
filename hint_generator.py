@@ -4,17 +4,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Initialize the Groq client (using exactly the same API interface as OpenAI)
-# You need to set GROQ_API_KEY in your .env file
-client = OpenAI(
-    api_key=os.environ.get("GROQ_API_KEY"),
-    base_url="https://api.groq.com/openai/v1"
-)
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = OpenAI(
+            api_key=os.environ.get("GROQ_API_KEY"),
+            base_url="https://api.groq.com/openai/v1",
+        )
+    return _client
+
 
 def generate_hint(board_state, best_move_index):
     try:
         if not os.environ.get("GROQ_API_KEY"):
             return "Кешіріңіз, AI көмекшісі баптаулары толық емес (GROQ_API_KEY жоқ)."
+
+        client = _get_client()
 
         # Determine if it's white (0) or black (1) moving
         player = "Ақ" if board_state.currentPlayer == 0 else "Қара"
