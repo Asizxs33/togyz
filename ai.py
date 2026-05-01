@@ -382,22 +382,38 @@ def get_best_move_alphabeta(root_state: TogyzkumalakState, root_player: int,
     best_move = moves[0]
     deadline = time.time() + max_time_seconds * 0.95
 
+    # Wider tie tolerance in the opening so the bot does not repeat the same
+    # line every game. Tightens as the position evaluation matters more.
+    total_stones = sum(root_state.board)
+    if total_stones > 140:
+        tie_eps = 6.0
+    elif total_stones > 100:
+        tie_eps = 2.5
+    else:
+        tie_eps = 0.5
+
     for depth in range(1, 30):
         try:
             best_score = float('-inf')
-            alpha = float('-inf')
-            current_best = moves[0]
+            best_moves = [moves[0]]
 
+            # Use a full window at the root so equal-scored moves are
+            # discoverable (alpha tightening would hide ties).
             for move in moves:
                 child = root_state.clone()
                 child.makeMove(move)
-                score = -_negamax(child, depth - 1, -float('inf'), -alpha, deadline)
-                if score > best_score:
-                    best_score = score
-                    current_best = move
-                alpha = max(alpha, score)
+                score = -_negamax(child, depth - 1, -float('inf'), float('inf'), deadline)
 
-            best_move = current_best
+                if score > best_score + tie_eps:
+                    best_score = score
+                    best_moves = [move]
+                elif score >= best_score - tie_eps:
+                    if score > best_score:
+                        best_score = score
+                    if move not in best_moves:
+                        best_moves.append(move)
+
+            best_move = random.choice(best_moves)
             moves = [best_move] + [move for move in moves if move != best_move]
 
             if abs(best_score) > 9000:
@@ -487,10 +503,15 @@ def _mcts(root_state: TogyzkumalakState, root_player: int,
     if not root.children:
         return -1
 
-    return max(
-        root.children,
-        key=lambda child: child.visits + _tactical_move_score(root_state, child.move, root_player) * 0.05,
-    ).move
+    scored = [
+        (child, child.visits + _tactical_move_score(root_state, child.move, root_player) * 0.05)
+        for child in root.children
+    ]
+    top = max(score for _, score in scored)
+    # Random among children within ~5% of the top (keeps strength, adds variety).
+    threshold = top - max(1.0, abs(top) * 0.05)
+    candidates = [child for child, score in scored if score >= threshold]
+    return random.choice(candidates).move
 
 
 OPENING_BOOK = {
