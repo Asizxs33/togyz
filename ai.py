@@ -577,7 +577,7 @@ def order_moves(state: TogyzkumalakState, moves: list,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _quiescence(state: TogyzkumalakState, alpha: float, beta: float,
-                deadline: float, qdepth: int = 6) -> float:
+                deadline: float, qdepth: int = 8) -> float:
     if time.time() > deadline:
         raise _Timeout()
 
@@ -591,19 +591,45 @@ def _quiescence(state: TogyzkumalakState, alpha: float, beta: float,
         return alpha
 
     cur = state.currentPlayer
+    opp = 1 - cur
+    os_ = opp * 9
     moves = state.getPossibleMoves(cur)
 
-    # Only examine "loud" moves: captures and tuzdyk creation
+    # Only examine "loud" moves: captures and tuzdyk creation.
+    # Compute an estimated material gain so we can sort and delta-prune.
     loud = []
     for m in moves:
-        is_cap, is_tuz = _is_loud_move(state.board, state.tuzdyks, cur, m)
-        if is_cap or is_tuz:
-            loud.append((m, is_tuz))
+        land, d0, d1 = _simulate_sow(state.board, state.tuzdyks, m)
+        donated_to_opp = d0 if opp == 0 else d1
+        if donated_to_opp > 0:
+            continue   # never explore moves that feed opponent's tuzdyk
+        if land < 0 or land in state.tuzdyks:
+            continue
+        if not (os_ <= land < os_ + 9):
+            continue
+        fut = state.board[land] + 1
+        is_cap = (fut % 2 == 0)
+        is_tuz = (fut == 3 and state.tuzdyks[cur] == -1
+                  and land not in (8, 17)
+                  and (state.tuzdyks[opp] == -1 or state.tuzdyks[opp] % 9 != land % 9))
+        if not (is_cap or is_tuz):
+            continue
+        # Rough material gain in eval units: capture ~ fut * kazan_weight (~6),
+        # tuzdyk creation ~ 35 + 3 (existing stones) + future drain (≈ 35).
+        gain = (fut * 6.0) if is_cap else 70.0
+        loud.append((m, is_tuz, gain))
 
-    # Tuzdyk creation first, then captures by value
-    loud.sort(key=lambda x: (x[1], state.board[x[0]]), reverse=True)
+    # Tuzdyk creation first, then captures by gain
+    loud.sort(key=lambda x: (x[1], x[2]), reverse=True)
 
-    for m, _ in loud:
+    # Delta pruning margin — slightly above heuristic noise.
+    DELTA = 8.0
+
+    for m, is_tuz, gain in loud:
+        # Skip moves that even with their gain can't lift us to alpha.
+        # Tuzdyk moves are too positionally important to delta-prune.
+        if not is_tuz and stand_pat + gain + DELTA < alpha:
+            continue
         child = state.clone()
         child.makeMove(m)
         score = -_quiescence(child, -beta, -alpha, deadline, qdepth - 1)
@@ -624,7 +650,8 @@ class _Timeout(Exception):
 
 
 def _negamax(state: TogyzkumalakState, depth: int,
-             alpha: float, beta: float, deadline: float, ply: int = 0) -> float:
+             alpha: float, beta: float, deadline: float,
+             ply: int = 0, allow_null: bool = True) -> float:
     if time.time() > deadline:
         raise _Timeout()
 
@@ -633,16 +660,19 @@ def _negamax(state: TogyzkumalakState, depth: int,
     # ── Transposition Table lookup ────────────────────────────────────────
     key = _tt_key(state)
     entry = _TT.get(key)
-    if entry is not None and entry[0] >= depth:
+    tt_move = None
+    if entry is not None:
         tt_d, tt_s, tt_f, tt_mv = entry
-        if tt_f == _TT_EXACT:
-            return tt_s
-        elif tt_f == _TT_LOWER:
-            alpha = max(alpha, tt_s)
-        elif tt_f == _TT_UPPER:
-            beta  = min(beta,  tt_s)
-        if alpha >= beta:
-            return tt_s
+        tt_move = tt_mv
+        if tt_d >= depth:
+            if tt_f == _TT_EXACT:
+                return tt_s
+            elif tt_f == _TT_LOWER:
+                alpha = max(alpha, tt_s)
+            elif tt_f == _TT_UPPER:
+                beta  = min(beta,  tt_s)
+            if alpha >= beta:
+                return tt_s
 
     if state.isGameOver:
         if state.winner == state.currentPlayer:
@@ -655,27 +685,74 @@ def _negamax(state: TogyzkumalakState, depth: int,
     if depth == 0:
         return _quiescence(state, alpha, beta, deadline)
 
+    # ── Null-move pruning ─────────────────────────────────────────────────
+    # If we skip our turn and opponent still can't beat beta, we can prune.
+    # Skip in endgame (zugzwang risk) and near terminal scores.
+    on_board = sum(state.board)
+    if (allow_null and depth >= 3 and on_board >= 30
+            and abs(beta) < 9000 and abs(alpha) < 9000):
+        static = evaluate(state)
+        if static >= beta:
+            null_child = state.clone()
+            null_child.currentPlayer = 1 - null_child.currentPlayer
+            R = 2 + (depth // 6)
+            score = -_negamax(null_child, depth - 1 - R,
+                              -beta, -beta + 1, deadline, ply + 1, allow_null=False)
+            if score >= beta:
+                return beta
+
     moves = state.getPossibleMoves(state.currentPlayer)
     if not moves:
         return -(10000.0 + depth)
 
     moves = order_moves(state, moves)
 
-    # ── Promote killer moves to front ────────────────────────────────────
+    # ── Promote killer moves and TT move to front ───────────────────────
     if ply < 32:
         k0, k1 = _killers[ply]
         if k1 is not None and k1 in moves:
             moves.remove(k1); moves.insert(0, k1)
         if k0 is not None and k0 in moves:
             moves.remove(k0); moves.insert(0, k0)
+    if tt_move is not None and tt_move in moves:
+        moves.remove(tt_move); moves.insert(0, tt_move)
 
     best      = float('-inf')
     best_move = moves[0]
 
-    for move in moves:
+    for i, move in enumerate(moves):
         child = state.clone()
         child.makeMove(move)
-        score = -_negamax(child, depth - 1, -beta, -alpha, deadline, ply + 1)
+
+        if i == 0:
+            # First move: full window (principal variation).
+            score = -_negamax(child, depth - 1, -beta, -alpha,
+                              deadline, ply + 1, allow_null=True)
+        else:
+            # Decide LMR reduction. Don't reduce loud moves or shallow searches.
+            reduction = 0
+            if depth >= 3 and i >= 3:
+                is_cap, is_tuz = _is_loud_move(state.board, state.tuzdyks,
+                                               state.currentPlayer, move)
+                if not (is_cap or is_tuz):
+                    reduction = 1
+                    if depth >= 5 and i >= 6:
+                        reduction = 2
+
+            # PVS: try null-window search first (with optional LMR).
+            score = -_negamax(child, depth - 1 - reduction,
+                              -alpha - 1, -alpha, deadline, ply + 1, allow_null=True)
+
+            # If reduced search beat alpha, re-search at full depth (still null window).
+            if reduction > 0 and score > alpha:
+                score = -_negamax(child, depth - 1,
+                                  -alpha - 1, -alpha, deadline, ply + 1, allow_null=True)
+
+            # If null-window indicates this is the new best AND below beta, re-search full window.
+            if alpha < score < beta:
+                score = -_negamax(child, depth - 1, -beta, -alpha,
+                                  deadline, ply + 1, allow_null=True)
+
         if score > best:
             best = score
             best_move = move
