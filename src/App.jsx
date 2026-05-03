@@ -38,6 +38,44 @@ function App() {
     const displayKazans = animKazans || gameState.kazans;
     const displayTuzdyks = animTuzdyks || gameState.tuzdyks;
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (!window.togyzLog) window.togyzLog = [];
+        if (moveHistory.length === 0) {
+            window.togyzLog = [];
+            return;
+        }
+        const last = moveHistory[moveHistory.length - 1];
+        const entry = {
+            n: moveHistory.length,
+            player: last.player,
+            who: last.player === aiPlayer ? 'AI' : 'HUMAN',
+            notation: last.notation,
+            board: [...gameState.board],
+            kazans: [...gameState.kazans],
+            tuzdyks: [...gameState.tuzdyks],
+        };
+        window.togyzLog.push(entry);
+        console.log(
+            `#${entry.n} ${entry.who}(P${entry.player}) ${entry.notation || ''}  ` +
+            `kazans=${entry.kazans.join('/')}  tuz=${entry.tuzdyks.join(',')}`
+        );
+    }, [moveHistory, gameState, aiPlayer]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || !gameState.isGameOver) return;
+        console.log(
+            `%cGAME OVER — winner=P${gameState.winner}  ` +
+            `kazans=${gameState.kazans.join('/')}  moves=${moveHistory.length}`,
+            'font-weight:bold;color:#c44'
+        );
+        console.log(
+            'To send the full game, run in this console:\n' +
+            '  copy(JSON.stringify(window.togyzLog))\n' +
+            '(then paste in chat)'
+        );
+    }, [gameState.isGameOver, gameState.winner, gameState.kazans, moveHistory.length]);
+
     const playAnimation = useCallback((frames, finalState) => {
         setIsAnimating(true);
         let frameIndex = 0;
