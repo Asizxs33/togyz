@@ -404,17 +404,20 @@ def _evaluate_heuristic(state: TogyzkumalakState) -> float:
     ev = (state.kazans[cur] - state.kazans[opp]) * kazan_weight
 
     # 2. Tuzdyk advantage
+    # Weight calibrated against observed games: a center tuzdyk on opponent's
+    # side drains ~20-40 stones over the rest of a long game. At kazan_weight
+    # ~6, that's worth +120-+240 of eval. 80 is a conservative floor.
     my_tuz = state.tuzdyks[cur] != -1
     opp_tuz = state.tuzdyks[opp] != -1
-    ev += (my_tuz - opp_tuz) * 35.0
+    ev += (my_tuz - opp_tuz) * 80.0
 
     # 2b. Tuzdyk position quality: center tuzdyk (pos 3-5) captures more on average
     if my_tuz:
         tpos = state.tuzdyks[cur] % 9
-        ev += (4 - abs(tpos - 4)) * 3.0   # center=+12, edge=0
+        ev += (4 - abs(tpos - 4)) * 6.0   # center=+24, edge=0
     if opp_tuz:
         tpos = state.tuzdyks[opp] % 9
-        ev -= (4 - abs(tpos - 4)) * 3.0
+        ev -= (4 - abs(tpos - 4)) * 6.0
 
     # 3. Tuzdyk DANGER: stones we'd donate to opponent's tuzdyk
     opp_tuz_pos = state.tuzdyks[opp]
@@ -438,8 +441,10 @@ def _evaluate_heuristic(state: TogyzkumalakState) -> float:
         if v > 0 and v % 2 == 0:
             ev -= v * 0.9
 
-    # 6. THREAT DETECTION: which of our pockets can opponent capture NEXT move?
-    # Makes AI proactively defend instead of waiting to be attacked.
+    # 6. THREAT DETECTION: opponent moves that hurt us NEXT turn — captures
+    # AND tuzdyk creation on our side. Makes AI proactively defend.
+    my_tuz_idx = state.tuzdyks[cur]
+    threatened_tuz_pockets = set()
     for i in range(os, os + 9):
         if state.board[i] == 0:
             continue
@@ -450,6 +455,13 @@ def _evaluate_heuristic(state: TogyzkumalakState) -> float:
             fut = state.board[land] + 1
             if fut % 2 == 0:
                 ev -= fut * 1.8  # strongly penalize being under immediate threat
+            elif (fut == 3 and not opp_tuz and land not in (8, 17)
+                  and (my_tuz_idx == -1 or my_tuz_idx % 9 != land % 9)):
+                threatened_tuz_pockets.add(land)
+    # Imminent tuzdyk-creation against us is permanent damage. Penalize per
+    # threatened pocket so the search will play around it (move our 2-stone
+    # pit, or push stones past it) instead of just walking into the fork.
+    ev -= len(threatened_tuz_pockets) * 25.0
 
     # 7. SETUP DETECTION: our moves that create future capture opportunities
     # (2-move planning: we set it up now, capture next turn)
